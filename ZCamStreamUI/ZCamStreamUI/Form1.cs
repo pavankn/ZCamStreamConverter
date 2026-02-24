@@ -107,45 +107,43 @@ namespace com.khelai.ZCamStreamUI
             }
         }
 
+        private VideoSettings GetOrCreateSettings(string ip)
+        {
+            if (!_videoSettings.ContainsKey(ip))
+            {
+                _videoSettings[ip] = CreateDefaultSettings();
+            }
+            return _videoSettings[ip];
+        }
+
         private void Camera_CheckedChanged(object sender, EventArgs e)
         {
             var chk = (CheckBox)sender;
             string ip = chk.Tag.ToString();
 
-            if (!chk.Checked)
+            // Ensure settings exist when checked
+            if (chk.Checked)
             {
-                // If the unchecked camera was active, hide video settings
-                if (_activeCameraIp == ip)
+                GetOrCreateSettings(ip);
+
+                // If no active camera yet, make this one active
+                if (_activeCameraIp == null)
                 {
-                    groupBoxVideo.Visible = false;
-                    _activeCameraIp = null;
+                    _activeCameraIp = ip;
+                    LoadSettingsToUI(_videoSettings[ip]);
+                    groupBoxVideo.Visible = true;
                 }
-                return;
-            }
-
-            _activeCameraIp = ip;          
-
-            if (!_videoSettings.ContainsKey(ip))
-            {
-                _videoSettings[ip] = CreateDefaultSettings();
-
-                // Explicit UI defaults
-                comboBoxResolution.SelectedIndex = 2; // 1920x1080
-                comboBoxStream.SelectedItem = "Stream1";
-                comboBoxHWAccel.SelectedItem = "True";
-                comboBoxCodec.SelectedItem = "HEVC";
             }
             else
             {
-                LoadSettingsToUI(_videoSettings[ip]);
+                // Unchecked camera
+                if (_activeCameraIp == ip)
+                {
+                    _activeCameraIp = null;
+                    groupBoxVideo.Visible = false;
+                }
             }
-
-            //THIS is where it belongs
-            LoadSettingsToUI(_videoSettings[ip]);
-
-            groupBoxVideo.Visible = true;
-            groupBoxVideo.Text = $"Video Settings – {ip}";
-        }
+        }      
 
         private void AddCamera(string ip)
         {
@@ -158,10 +156,28 @@ namespace com.khelai.ZCamStreamUI
             var chk = CreateCameraCheckBox(_nextCameraIndex++, ip);
             chk.Tag = ip;
             chk.CheckedChanged += Camera_CheckedChanged;
+            chk.Click += Camera_Clicked;
 
             grpBoxCameras.Controls.Add(chk);
 
             ReLayoutCameraCheckboxes();
+        }
+
+        private void Camera_Clicked(object? sender, EventArgs e)
+        {
+            var chk = (CheckBox)sender;
+            string ip = chk.Tag.ToString();
+
+            // Only allow editing if camera is checked
+            if (!chk.Checked)
+                return;
+
+            _activeCameraIp = ip;
+
+            LoadSettingsToUI(GetOrCreateSettings(ip));
+
+            groupBoxVideo.Visible = true;
+            groupBoxVideo.Text = $"Video Settings – {ip}";
         }
 
         private async Task ScanCamerasAsync()
@@ -271,6 +287,76 @@ namespace com.khelai.ZCamStreamUI
             s.HwDecoding = comboBoxHWAccel.SelectedItem?.ToString() == "True";
 
             s.Resolution = comboBoxResolution.SelectedItem as VideoResolution;
+        }
+
+        private List<string> GetSelectedCameraIps()
+        {
+            return grpBoxCameras.Controls
+                .OfType<CheckBox>()
+                .Where(chk => chk.Checked && chk.Tag != null)
+                .Select(chk => chk.Tag.ToString())
+                .ToList();
+        }
+
+        private StreamConfigFile BuildStreamConfig()
+        {
+            var cfg = new StreamConfigFile();
+
+            foreach (var ip in GetSelectedCameraIps())
+            {
+                var s = _videoSettings[ip];
+
+                cfg.Streams.Add(new StreamConfig
+                {
+                    Ip = ip,
+                    Stream = s.Stream,
+                    Resolution = s.Resolution,
+                    Codec = s.Codec,
+                    HwDecoding = s.HwDecoding
+                });
+            }
+
+            return cfg;
+        }
+
+        private string WriteStreamsJson()
+        {
+            var config = BuildStreamConfig();
+
+            string path = Path.Combine(
+                AppDomain.CurrentDomain.BaseDirectory,
+                "streams.json");
+
+            var json = System.Text.Json.JsonSerializer.Serialize(
+                config,
+                new System.Text.Json.JsonSerializerOptions
+                {
+                    WriteIndented = true
+                });
+
+            File.WriteAllText(path, json);
+
+            return path;
+        }
+
+        private void OnClick_StartCamera(object sender, EventArgs e)
+        {
+            var selectedIps = GetSelectedCameraIps();
+
+            if (selectedIps.Count == 0)
+            {
+                MessageBox.Show("Please select at least one camera.");
+                return;
+            }
+
+            string jsonPath = WriteStreamsJson();
+
+            int ret = ZCamNativeProcessor.ZCamNative_ProcessStream(jsonPath);
+
+            if (ret != 0)
+            {
+                MessageBox.Show($"ProcessStream failed: {ret}");
+            }
         }
     }
 }
