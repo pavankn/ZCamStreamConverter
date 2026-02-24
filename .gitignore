@@ -1,0 +1,8 @@
+﻿################################################################################
+# This .gitignore file was automatically created by Microsoft(R) Visual Studio.
+################################################################################
+
+/ZCamStreamUI/.vs/ZCamStreamUI/CopilotIndices/17.14.1593.33849
+/ZCamStreamUI/.vs/ZCamStreamUI/FileContentIndex
+/ZCamStreamUI/ZCamStreamUI/obj
+/ZCamStreamUI/.vs/ZCamStreamUI/v17
