@@ -14,7 +14,7 @@ namespace com.khelai.ZCamStreamUI
         private int _nextCameraIndex = 0;
         private const int CAMERA_START_Y = 25;
         private const int CAMERA_SPACING = 8;
-        private const int DISCOVER_TIMEOUT = 6000;
+        private const int DISCOVER_TIMEOUT = 2000;
         private const int QUERY_INTERVAL = 1000;
         private const String MDNS_SERVICE_NAME = "_eagle._tcp.local";
 
