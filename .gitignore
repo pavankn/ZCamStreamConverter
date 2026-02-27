@@ -15,3 +15,5 @@
 /.vs/ZCamStreamConverter/v17
 /ZCamStreamUI/.vs
 /ZCamStreamUI/x64/Debug
+/ZCamNative/x64/Debug
+*.log
