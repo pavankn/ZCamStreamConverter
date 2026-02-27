@@ -111,14 +111,20 @@
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalIncludeDirectories>.\external\include;.\external\include\Khel;.\external\include\libuv;.\external\include\ffmpeg;.\external\include\NDI;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
+      <AdditionalLibraryDirectories>.\external\lib\ffmpeg;.\external\lib\libssp;.\external\lib\NDI;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>libssp.lib;libsspd.lib;Processing.NDI.Lib.Advanced.x64.lib;Processing.NDI.Lib.x64.lib;avcodec.lib;avformat.lib;avutil.lib;swscale.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>copy $(SolutionDir)$(PlatformTarget)\$(Configuration)\"*.dll"  $(SolutionDir)$(SolutionName)\bin\$(Configuration)\net8.0-windows\</Command>
+      <Command>copy $(SolutionDir)$(PlatformTarget)\$(Configuration)\"*.dll"  $(SolutionDir)$(SolutionName)\bin\$(Configuration)\net8.0-windows\
+copy $(ProjectDir)external\bin\NDI\"*.dll"  $(SolutionDir)$(SolutionName)\bin\$(Configuration)\net8.0-windows\
+copy $(ProjectDir)external\bin\libssp\"*.dll"  $(SolutionDir)$(SolutionName)\bin\$(Configuration)\net8.0-windows\
+copy $(ProjectDir)external\bin\ffmpeg\"*.dll"  $(SolutionDir)$(SolutionName)\bin\$(Configuration)\net8.0-windows\</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -133,25 +139,34 @@
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
       <UseUnicodeForAssemblerListing>false</UseUnicodeForAssemblerListing>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalIncludeDirectories>.\external\include;.\external\include\Khel;.\external\include\libuv;.\external\include\ffmpeg;.\external\include\NDI;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableUAC>false</EnableUAC>
+      <AdditionalLibraryDirectories>.\external\lib\ffmpeg;.\external\lib\libssp;.\external\lib\NDI;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>libssp.lib;libsspd.lib;Processing.NDI.Lib.Advanced.x64.lib;Processing.NDI.Lib.x64.lib;avcodec.lib;avformat.lib;avutil.lib;swscale.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>copy $(SolutionDir)$(PlatformTarget)\$(Configuration)\"*.dll"  $(SolutionDir)$(SolutionName)\bin\$(Configuration)\net8.0-windows\</Command>
+      <Command>copy $(SolutionDir)$(PlatformTarget)\$(Configuration)\"*.dll"  $(SolutionDir)$(SolutionName)\bin\$(Configuration)\net8.0-windows\
+copy $(ProjectDir)external\bin\NDI\"*.dll"  $(SolutionDir)$(SolutionName)\bin\$(Configuration)\net8.0-windows\
+copy $(ProjectDir)external\bin\libssp\"*.dll"  $(SolutionDir)$(SolutionName)\bin\$(Configuration)\net8.0-windows\
+copy $(ProjectDir)external\bin\ffmpeg\"*.dll"  $(SolutionDir)$(SolutionName)\bin\$(Configuration)\net8.0-windows\</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="ClientProcessor.h" />
     <ClInclude Include="framework.h" />
+    <ClInclude Include="ClientConfig.h" />
     <ClInclude Include="Logger.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="ZcamNativeExports.h" />
+    <ClInclude Include="ZCamStreamBuilder.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="dllmain.cpp" />
-    <ClInclude Include="StreamConfig.h">
+    <ClInclude Include="StreamParser.h">
       <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClInclude>
     <ClCompile Include="Logger.cpp" />
@@ -161,6 +176,7 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
     </ClCompile>
+    <ClCompile Include="ClientProcess.cpp" />
     <ClCompile Include="ZCamNativeExports.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

@@ -5,15 +5,14 @@
 #include <fstream>
 #include <stdexcept>
 #include "Logger.h"
+#include "ClientConfig.h"
 
 using json = nlohmann::json;
 
 
 namespace com_khelai_zcamnative
 {
-	Logger log("zcam_native.log");
-
-	class StreamConfig
+	class StreamParser
 	{
 	public:
 		std::string ip;
@@ -23,10 +22,16 @@ namespace com_khelai_zcamnative
 		int width;
 		int height;
 		int frameRate;
+		DecoderType decoderType;
+		HWCodecType hwCodecType;
+		ClientConfig clientConfig;
 
-		static std::vector<StreamConfig> fromJson(const char* jsonPath) {
+		std::vector<ClientConfig> fromJson(const char* jsonPath) {
 
-			std::vector<StreamConfig> configs;
+			Logger log("zcam_native.log");
+
+			std::vector<ClientConfig> configs;
+			int index = 0;
 
 			log.info("Parsing stream config from JSON: ", jsonPath);
 
@@ -56,11 +61,17 @@ namespace com_khelai_zcamnative
 				}
 				log.info("Found Streams, Now Start Parsing");
 
-				StreamConfig config;
+				StreamParser config;
 				config.ip = streamJson["Ip"];
 				config.codec = streamJson["Codec"];
 				config.hwDecoding = streamJson["HwDecoding"];
 				config.stream = streamJson["Stream"];
+
+				clientConfig.ip = config.ip;
+				clientConfig.decoder_type = config.hwDecoding ? DecoderType::HW_CUDA : DecoderType::SOFTWARE;
+				clientConfig.hwCodecType = (config.codec == "H264") ? HWCodecType::H264_CUVID : HWCodecType::HEVC_CUVID;
+				clientConfig.ndi_name = "KHEL_NDI_" + std::to_string(index++);
+				clientConfig.stream = config.stream;
 
 				log.info("Parsed stream config - IP: {}, Codec: {}, HW Decoding: {}, Stream: {} ",
 					config.ip, config.codec, config.hwDecoding, config.stream);
@@ -72,9 +83,11 @@ namespace com_khelai_zcamnative
 					config.width = streamJson["Resolution"]["Width"];
 					config.height = streamJson["Resolution"]["Height"];
 					log.info("Found Resolution: Width: {}, Height: {} ", config.width, config.height);
+					clientConfig.width = config.width;
+					clientConfig.height = config.height;
 				}							
 
-				configs.push_back(config);
+				configs.push_back(clientConfig);
 			}
 			return configs;
 		}

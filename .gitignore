@@ -18,3 +18,4 @@
 /ZCamNative/x64/Debug
 *.log
 /ZCamStreamUI/x64/Release
+/ZCamNativeProcess/ZCamNativeProcessor/external

@@ -4,18 +4,29 @@
 #include "ZcamNativeExports.h"
 #include <iostream>
 #include <nlohmann/json.hpp>
-#include "StreamConfig.h"
+#include "ClientConfig.h"
+#include "ClientProcessor.h"
 
 using json = nlohmann::json;
 
 using namespace com_khelai_zcamnative;
 
 ZCAM_NATIVE_API int
-ZCamNative_ProcessStream(const char* streamconfig)
+ZCamNative_ProcessStream(const char* streamJSON)
 {
-	std::cout << "Pavankn ProcessStream called with config: " << streamconfig << std::endl;
+	Logger log("zcam_native.log");
 
-	std::vector<StreamConfig> _streamConfig = StreamConfig::fromJson(streamconfig);
+	log.info("Pavankn ProcessStream called with config: {} ", streamJSON);
 
-	return 1982;
+	std::unique_ptr<StreamParser> _streamParser = std::make_unique<StreamParser>();
+
+	std::unique_ptr<ClientProcessor> _clientProcessor = std::make_unique<ClientProcessor>();
+
+	std::vector<ClientConfig> _clientConfig = _streamParser->fromJson(streamJSON);
+
+	log.info("Pavankn Num ClientConfigs Are: {} ", _clientConfig.size());
+
+	_clientProcessor->Process(_clientConfig);
+
+	return 0;
 }
