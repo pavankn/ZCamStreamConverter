@@ -5,11 +5,9 @@ namespace com.khelai.ZCamStreamUI
 {
     public partial class Form1 : Form
     {
-        private MdnsDiscoverer _discoverer;
-        private Panel overlayPanel;
-        private ProgressBar spinner;
-        private readonly Dictionary<string, VideoSettings> _videoProfiles
-            = new Dictionary<string, VideoSettings>();
+        private MdnsDiscoverer? _discoverer;
+        private Panel overlayPanel = null!;
+        private ProgressBar spinner = null!;
 
         private int _nextCameraIndex = 0;
         private const int CAMERA_START_Y = 25;
@@ -17,23 +15,18 @@ namespace com.khelai.ZCamStreamUI
         private const int DISCOVER_TIMEOUT = 2000;
         private const int QUERY_INTERVAL = 1000;
         private const String MDNS_SERVICE_NAME = "_eagle._tcp.local";
+        private bool _isLoadingSettings;
 
         // Stores video settings per camera IP
         private readonly Dictionary<string, VideoSettings> _videoSettings
             = new Dictionary<string, VideoSettings>();
 
         // Currently selected / active camera IP
-        private string _activeCameraIp;
+        private string? _activeCameraIp;
 
         public Form1()
         {
             InitializeComponent();
-        }
-
-
-        private int CenterX(Control parent, Control child)
-        {
-            return (parent.ClientSize.Width - child.Width) / 2;
         }
 
         private void InitializeSpinnerOverlay()
@@ -82,7 +75,7 @@ namespace com.khelai.ZCamStreamUI
             }
         }
 
-        private CheckBox CreateCameraCheckBox(int index, string ip)
+        private static CheckBox CreateCameraCheckBox(int index, string ip)
         {
             return new CheckBox
             {
@@ -131,7 +124,7 @@ namespace com.khelai.ZCamStreamUI
                 {
                     _activeCameraIp = ip;
                     LoadSettingsToUI(_videoSettings[ip]);
-                    groupBoxVideo.Visible = true;
+                    //groupBoxVideo.Visible = true;
                 }
             }
             else
@@ -174,10 +167,10 @@ namespace com.khelai.ZCamStreamUI
 
             _activeCameraIp = ip;
 
-            LoadSettingsToUI(GetOrCreateSettings(ip));
+            //LoadSettingsToUI(GetOrCreateSettings(ip));
 
-            groupBoxVideo.Visible = true;
-            groupBoxVideo.Text = $"Video Settings – {ip}";
+            //groupBoxVideo.Visible = true;
+            //groupBoxVideo.Text = $"Video Settings – {ip}";
         }
 
         private async Task ScanCamerasAsync()
@@ -237,57 +230,76 @@ namespace com.khelai.ZCamStreamUI
         {
             return new VideoSettings
             {
-                Stream = "Stream0",
+                Stream = "Stream1",
                 Resolution = new VideoResolution { Width = 1920, Height = 1080 },
                 HwDecoding = true,
-                Codec = "H264"
+                Codec = "HEVC"
             };
         }
 
         private void LoadSettingsToUI(VideoSettings s)
         {
-            // Stream
-            comboBoxStream.SelectedItem =
-                comboBoxStream.Items.Cast<object>()
-                    .FirstOrDefault(x => x.ToString() == s.Stream);
+            _isLoadingSettings = true;
 
-            // Codec
-            comboBoxCodec.SelectedItem =
-                comboBoxCodec.Items.Cast<object>()
-                    .FirstOrDefault(x => x.ToString() == s.Codec);
-
-            // HW Accel
-            comboBoxHWAccel.SelectedItem = s.HwDecoding ? "True" : "False";
-
-            // Resolution (SAFE)
-            if (s.Resolution != null)
+            try
             {
-                comboBoxResolution.SelectedItem =
-                    comboBoxResolution.Items
-                        .OfType<VideoResolution>()
-                        .FirstOrDefault(r =>
-                            r.Width == s.Resolution.Width &&
-                            r.Height == s.Resolution.Height);
+                // Stream
+                comboBoxStream.SelectedItem =
+                    comboBoxStream.Items.Cast<object>()
+                        .FirstOrDefault(x => x.ToString() == s.Stream);
+
+                // Codec
+                comboBoxCodec.SelectedItem =
+                    comboBoxCodec.Items.Cast<object>()
+                        .FirstOrDefault(x => x.ToString() == s.Codec);
+
+                // HW Accel
+                comboBoxHWAccel.SelectedItem = s.HwDecoding ? "True" : "False";
+
+                // Resolution
+                if (s.Resolution != null)
+                {
+                    comboBoxResolution.SelectedItem =
+                        comboBoxResolution.Items
+                            .OfType<VideoResolution>()
+                            .FirstOrDefault(r =>
+                                r.Width == s.Resolution.Width &&
+                                r.Height == s.Resolution.Height);
+                }
+                else
+                {
+                    comboBoxResolution.SelectedIndex = 2;
+                }
             }
-            else
+            finally
             {
-                // Fallback to default 1920x1080
-                comboBoxResolution.SelectedIndex = 2;
+                _isLoadingSettings = false;
             }
         }
+
         private void SaveUIToSettings(object sender, EventArgs e)
         {
+            if (_isLoadingSettings)
+                return;
+
             if (_activeCameraIp == null)
                 return;
 
             var s = _videoSettings[_activeCameraIp];
 
-            s.Stream = comboBoxStream.SelectedItem?.ToString();
-            s.Codec = comboBoxCodec.SelectedItem?.ToString();
-            s.HwDecoding = comboBoxHWAccel.SelectedItem?.ToString() == "True";
+            if (comboBoxStream.SelectedItem != null)
+                s.Stream = comboBoxStream.SelectedItem?.ToString() ?? s.Stream;
 
-            s.Resolution = comboBoxResolution.SelectedItem as VideoResolution;
+            if (comboBoxCodec.SelectedItem != null)
+                s.Codec = comboBoxCodec.SelectedItem?.ToString() ?? s.Codec;
+
+            if (comboBoxHWAccel.SelectedItem != null)
+                s.HwDecoding = comboBoxHWAccel.SelectedItem.ToString() == "True";
+
+            if (comboBoxResolution.SelectedItem is VideoResolution res)
+                s.Resolution = res;
         }
+     
 
         private List<string> GetSelectedCameraIps()
         {
@@ -349,14 +361,7 @@ namespace com.khelai.ZCamStreamUI
                 return;
             }
 
-            string jsonPath = WriteStreamsJson();
-
-            int ret = ZCamNativeProcessor.ZCamNative_ProcessStream(jsonPath);
-
-            if (ret != 0)
-            {
-                MessageBox.Show($"ProcessStream failed: {ret}");
-            }
+            string jsonPath = WriteStreamsJson();           
         }
     }
 }

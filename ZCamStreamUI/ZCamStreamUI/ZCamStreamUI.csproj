@@ -12,8 +12,4 @@
     <PackageReference Include="Makaretu.Dns.Multicast" Version="0.27.0" />
   </ItemGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="..\..\ZCamNativeProcess\ZCamNativeProcessor\ZCamNativeProcessor.vcxproj" />
-  </ItemGroup>
-
 </Project>

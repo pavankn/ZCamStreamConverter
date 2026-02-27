@@ -1,11 +1,14 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
-VisualStudioVersion = 17.14.37012.4 d17.14
+VisualStudioVersion = 17.14.37012.4
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ZCamStreamUI", "ZCamStreamUI\ZCamStreamUI.csproj", "{97011190-E3D4-4D0C-8FDE-C876E30C48F8}"
+	ProjectSection(ProjectDependencies) = postProject
+		{96B3D0A1-0590-4981-829A-7FF37EE5A643} = {96B3D0A1-0590-4981-829A-7FF37EE5A643}
+	EndProjectSection
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ZCamNativeProcessor", "..\ZCamNativeProcess\ZCamNativeProcessor\ZCamNativeProcessor.vcxproj", "{E3BEF235-4D5C-4401-BE32-009699BE3A6F}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ZCamNative", "..\ZCamNative\ZCamNative.vcxproj", "{96B3D0A1-0590-4981-829A-7FF37EE5A643}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -29,18 +32,18 @@ Global
 		{97011190-E3D4-4D0C-8FDE-C876E30C48F8}.Release|x64.Build.0 = Release|Any CPU
 		{97011190-E3D4-4D0C-8FDE-C876E30C48F8}.Release|x86.ActiveCfg = Release|Any CPU
 		{97011190-E3D4-4D0C-8FDE-C876E30C48F8}.Release|x86.Build.0 = Release|Any CPU
-		{E3BEF235-4D5C-4401-BE32-009699BE3A6F}.Debug|Any CPU.ActiveCfg = Debug|x64
-		{E3BEF235-4D5C-4401-BE32-009699BE3A6F}.Debug|Any CPU.Build.0 = Debug|x64
-		{E3BEF235-4D5C-4401-BE32-009699BE3A6F}.Debug|x64.ActiveCfg = Debug|x64
-		{E3BEF235-4D5C-4401-BE32-009699BE3A6F}.Debug|x64.Build.0 = Debug|x64
-		{E3BEF235-4D5C-4401-BE32-009699BE3A6F}.Debug|x86.ActiveCfg = Debug|Win32
-		{E3BEF235-4D5C-4401-BE32-009699BE3A6F}.Debug|x86.Build.0 = Debug|Win32
-		{E3BEF235-4D5C-4401-BE32-009699BE3A6F}.Release|Any CPU.ActiveCfg = Release|x64
-		{E3BEF235-4D5C-4401-BE32-009699BE3A6F}.Release|Any CPU.Build.0 = Release|x64
-		{E3BEF235-4D5C-4401-BE32-009699BE3A6F}.Release|x64.ActiveCfg = Release|x64
-		{E3BEF235-4D5C-4401-BE32-009699BE3A6F}.Release|x64.Build.0 = Release|x64
-		{E3BEF235-4D5C-4401-BE32-009699BE3A6F}.Release|x86.ActiveCfg = Release|Win32
-		{E3BEF235-4D5C-4401-BE32-009699BE3A6F}.Release|x86.Build.0 = Release|Win32
+		{96B3D0A1-0590-4981-829A-7FF37EE5A643}.Debug|Any CPU.ActiveCfg = Debug|x64
+		{96B3D0A1-0590-4981-829A-7FF37EE5A643}.Debug|Any CPU.Build.0 = Debug|x64
+		{96B3D0A1-0590-4981-829A-7FF37EE5A643}.Debug|x64.ActiveCfg = Debug|x64
+		{96B3D0A1-0590-4981-829A-7FF37EE5A643}.Debug|x64.Build.0 = Debug|x64
+		{96B3D0A1-0590-4981-829A-7FF37EE5A643}.Debug|x86.ActiveCfg = Debug|Win32
+		{96B3D0A1-0590-4981-829A-7FF37EE5A643}.Debug|x86.Build.0 = Debug|Win32
+		{96B3D0A1-0590-4981-829A-7FF37EE5A643}.Release|Any CPU.ActiveCfg = Release|x64
+		{96B3D0A1-0590-4981-829A-7FF37EE5A643}.Release|Any CPU.Build.0 = Release|x64
+		{96B3D0A1-0590-4981-829A-7FF37EE5A643}.Release|x64.ActiveCfg = Release|x64
+		{96B3D0A1-0590-4981-829A-7FF37EE5A643}.Release|x64.Build.0 = Release|x64
+		{96B3D0A1-0590-4981-829A-7FF37EE5A643}.Release|x86.ActiveCfg = Release|Win32
+		{96B3D0A1-0590-4981-829A-7FF37EE5A643}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

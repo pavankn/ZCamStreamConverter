@@ -9,8 +9,8 @@ namespace com.khelai.ZCamStreamUI
 {
     public class ZCamNativeProcessor
     {
-        [DllImport("ZCamNativeProcessor.dll", CallingConvention = CallingConvention.Cdecl)]
-        public static extern int ZCamNative_ProcessStream(
-       [MarshalAs(UnmanagedType.LPStr)] string jsonPath);
+       // [DllImport("ZCamNativeProcessor.dll", CallingConvention = CallingConvention.Cdecl)]
+       // public static extern int ZCamNative_ProcessStream(
+       //[MarshalAs(UnmanagedType.LPStr)] string jsonPath);
     }
 }
