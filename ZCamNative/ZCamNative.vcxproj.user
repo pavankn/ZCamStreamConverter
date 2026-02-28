@@ -1,11 +1,11 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="Current" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <LocalDebuggerCommandArguments>D:\Pavankn\source\repos\ZCamStreamConverter\ZCamStreamUI\ZCamStreamUI\bin\Debug\net8.0-windows\streams.json</LocalDebuggerCommandArguments>
+    <LocalDebuggerCommandArguments>D:\Pavankn\source\repos\ZCamStreamConverter\streams.json</LocalDebuggerCommandArguments>
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <LocalDebuggerCommandArguments>D:\Pavankn\source\repos\ZCamStreamConverter\ZCamStreamUI\ZCamStreamUI\bin\Debug\net8.0-windows\streams.json</LocalDebuggerCommandArguments>
+    <LocalDebuggerCommandArguments>D:\Pavankn\source\repos\ZCamStreamConverter\streams.json</LocalDebuggerCommandArguments>
     <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
   </PropertyGroup>
 </Project>

@@ -313,6 +313,8 @@ public:
 			curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
 			curl_easy_setopt(curl, CURLOPT_USERAGENT, "Mozilla/5.0");
 
+			log.info("Performing Curl on URL {} in attempt {} ", url, attempt);
+
 			CURLcode res = curl_easy_perform(curl);
 			curl_easy_cleanup(curl);
 
@@ -453,10 +455,10 @@ int SetParams() {
 			.apply();
 
 		if (success) {
-			log.info("Stream settings applied successfully for: {} ", found[i]);
+			log.info("Pavankn Stream settings applied successfully for: {} ", found[i]);
 		}
 		else {
-			std::cout << "Failed to apply stream settings for: " << found[i] << std::endl;
+			log.error("Failed to apply stream settings for: {} ", found[i]);
 		}
 	}
 

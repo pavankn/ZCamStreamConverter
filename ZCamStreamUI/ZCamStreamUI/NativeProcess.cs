@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 
 namespace com.khelai.ZCamStreamUI
 {
-    public class FastbootResult
+    public class ZCamNativeResult
     {
         public int ExitCode { get; set; }
         public string Output { get; set; }
@@ -19,7 +19,7 @@ namespace com.khelai.ZCamStreamUI
             get { return ExitCode == 0 && !ToolNotFound; }
         }
 
-        public FastbootResult()
+        public ZCamNativeResult()
         {
             Output = string.Empty;
         }
@@ -29,36 +29,146 @@ namespace com.khelai.ZCamStreamUI
     {
         public event Action<string> OutputReceived;
 
-        private readonly string _fastbootPath;
+        private readonly string _zcamNativePath;
         private bool _disposed;
+        private Process _runningProcess;
+        private CancellationTokenSource _linkedCts;
+        private readonly object _processLock = new object();
 
-        public ZCamNativeProcess(string fastbootPath = null)
+        public ZCamNativeProcess(string zCamNativePath)
         {
-            _fastbootPath = fastbootPath
+            _zcamNativePath = zCamNativePath
                 ?? @"C:\Program Files\KhelAI\ZCamStreamConverter\ZCamNative.exe";
 
-            if (!File.Exists(_fastbootPath))
+            if (!File.Exists(_zcamNativePath))
             {
-                Logger.Error("Fastboot executable not found at: " + _fastbootPath);
-                throw new FileNotFoundException("fastboot.exe not found", _fastbootPath);
+                Logger.Error("ZCamNative executable not found at: " + _zcamNativePath);
+                throw new FileNotFoundException("ZCamNative.exe not found", _zcamNativePath);
             }
 
             Logger.Info("═══════════════════════════════════════════════");
-            Logger.Info("FastbootProcess initialized at " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
-            Logger.Info("Fastboot path: " + _fastbootPath);
+            Logger.Info("ZCamNativeProcess initialized at " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+            Logger.Info("ZCamNative path: " + _zcamNativePath);
             Logger.Info("═══════════════════════════════════════════════");
         }
 
-
-        private async Task<FastbootResult> RunInternal(string arguments, bool isAsync, CancellationToken ct)
+        private async Task<ZCamNativeResult> RunInternalAsync(string arguments, bool isAsync, CancellationToken ct)
         {
             ct.ThrowIfCancellationRequested();
 
-            Logger.Debug("Preparing fastboot command: " + arguments);
+            Logger.Debug("Preparing ZCamNative command: " + arguments);
 
             var psi = new ProcessStartInfo
             {
-                FileName = _fastbootPath,
+                FileName = _zcamNativePath,
+                Arguments = arguments,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                StandardOutputEncoding = Encoding.UTF8,
+                StandardErrorEncoding = Encoding.UTF8
+            };
+
+            var outputBuilder = new StringBuilder(4096);
+
+            try
+            {
+                // 1. Create the process instance
+                var process = new Process { StartInfo = psi };
+
+                // 2. ASSIGN IT TO THE FIELD so Stop() can find it
+                lock (_processLock)
+                {
+                    _runningProcess = process;
+                }
+
+                process.OutputDataReceived += (sender, e) =>
+                {
+                    if (e.Data != null)
+                    {
+                        outputBuilder.AppendLine(e.Data);
+                        if (OutputReceived != null) OutputReceived(e.Data);
+                    }
+                };
+
+                process.ErrorDataReceived += (sender, e) =>
+                {
+                    if (e.Data != null)
+                    {
+                        outputBuilder.AppendLine(e.Data);
+                        if (OutputReceived != null) OutputReceived(e.Data);
+                        Logger.Warning(e.Data);
+                    }
+                };
+
+                Logger.Debug("Starting: ZCamNative " + arguments);
+                process.Start();
+
+                process.BeginOutputReadLine();
+                process.BeginErrorReadLine();
+
+                _linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+
+                _linkedCts.Token.Register(() =>
+                {
+                    TryKillProcess("Cancellation requested");
+                });
+
+                await process.WaitForExitAsync(_linkedCts.Token);
+
+                Logger.Debug("ZCamNative finished exit code: " + process.ExitCode);
+
+                return new ZCamNativeResult
+                {
+                    ExitCode = process.ExitCode,
+                    Output = outputBuilder.ToString().TrimEnd(),
+                    ToolNotFound = false
+                };
+
+            }
+            catch (OperationCanceledException)
+            {
+                Logger.Warning("Command cancelled: ZCamNative " + arguments);
+                throw;
+            }
+            catch (Exception ex)
+            {
+                bool toolNotFound = ex is Win32Exception &&
+                    (ex.Message.IndexOf("not found", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                     ex.Message.IndexOf("cannot find", StringComparison.OrdinalIgnoreCase) >= 0);
+
+                if (toolNotFound)
+                {
+                    Logger.Error("ZCamNative not found → " + ex.Message);
+                    return new ZCamNativeResult
+                    {
+                        ExitCode = -1,
+                        Output = ex.Message,
+                        ToolNotFound = true
+                    };
+                }
+
+                Logger.Error("Failed to run ZCamNative " + arguments + "\n" + ex);
+                return new ZCamNativeResult
+                {
+                    ExitCode = -1,
+                    Output = ex.ToString(),
+                    ToolNotFound = false
+                };
+            }
+        }
+
+
+        private async Task<ZCamNativeResult> RunInternal(string arguments, bool isAsync, CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            Logger.Debug("Preparing ZCamNative command: " + arguments);
+
+            var psi = new ProcessStartInfo
+            {
+                FileName = _zcamNativePath,
                 Arguments = arguments,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
@@ -93,34 +203,35 @@ namespace com.khelai.ZCamStreamUI
                         }
                     };
 
-                    Logger.Debug("Starting: fastboot " + arguments);
+                    Logger.Debug("Starting: ZCamNative " + arguments);
                     process.Start();
 
                     process.BeginOutputReadLine();
                     process.BeginErrorReadLine();
 
-                    Task waitTask = Task.Run(() => process.WaitForExit(), ct);
+                    _linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
 
-                    if (isAsync)
-                        await waitTask;
-                    else
-                        waitTask.GetAwaiter().GetResult();
+                    _linkedCts.Token.Register(() =>
+                    {
+                        TryKillProcess("Cancellation requested");
+                    });
 
-                    ct.ThrowIfCancellationRequested();
+                    await process.WaitForExitAsync(_linkedCts.Token);
 
-                    Logger.Debug("fastboot finished → exit code: " + process.ExitCode);
+                    Logger.Debug("ZCamNative finished exit code: " + process.ExitCode);
 
-                    return new FastbootResult
+                    return new ZCamNativeResult
                     {
                         ExitCode = process.ExitCode,
                         Output = outputBuilder.ToString().TrimEnd(),
                         ToolNotFound = false
                     };
+
                 }
             }
             catch (OperationCanceledException)
             {
-                Logger.Warning("Command cancelled: fastboot " + arguments);
+                Logger.Warning("Command cancelled: ZCamNative " + arguments);
                 throw;
             }
             catch (Exception ex)
@@ -131,8 +242,8 @@ namespace com.khelai.ZCamStreamUI
 
                 if (toolNotFound)
                 {
-                    Logger.Error("fastboot not found → " + ex.Message);
-                    return new FastbootResult
+                    Logger.Error("ZCamNative not found → " + ex.Message);
+                    return new ZCamNativeResult
                     {
                         ExitCode = -1,
                         Output = ex.Message,
@@ -140,25 +251,72 @@ namespace com.khelai.ZCamStreamUI
                     };
                 }
 
-                Logger.Error("Failed to run fastboot " + arguments + "\n" + ex);
-                return new FastbootResult
+                Logger.Error("Failed to run ZCamNative " + arguments + "\n" + ex);
+                return new ZCamNativeResult
                 {
                     ExitCode = -1,
                     Output = ex.ToString(),
                     ToolNotFound = false
                 };
             }
-        }       
+        }
+     
         public void Dispose()
         {
             if (_disposed) return;
             _disposed = true;
-            OutputReceived = null;
+
+            Logger.Info("Disposing ZCamNativeProcess");
+
+            try
+            {
+                _linkedCts?.Cancel();
+                TryKillProcess("Dispose()");
+            }
+            finally
+            {
+                _runningProcess?.Dispose();
+                _runningProcess = null;
+
+                _linkedCts?.Dispose();
+                _linkedCts = null;
+
+                OutputReceived = null;
+            }
         }
 
-        public Task<FastbootResult> RunAsync(string arguments, CancellationToken ct = default(CancellationToken))
+        public Task<ZCamNativeResult> RunAsync(string arguments, CancellationToken ct = default(CancellationToken))
         {
-            return RunInternal(arguments, true, ct);
+            return RunInternalAsync(arguments, true, ct);
+        }
+
+        public void Stop()
+        {
+            Logger.Info("Stopping ZCamNative...");
+            _linkedCts?.Cancel();
+            TryKillProcess("Stop() called");
+        }
+
+        private void TryKillProcess(string reason)
+        {
+            lock (_processLock)
+            {
+                try
+                {
+                    if (_runningProcess != null &&
+                        !_runningProcess.HasExited)
+                    {
+                        Logger.Warning($"Killing ZCamNative ({reason})");
+
+                        _runningProcess.Kill(true); // kill child tree
+                        _runningProcess.WaitForExit(3000);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warning("Kill failed: " + ex.Message);
+                }
+            }
         }
     }
 }

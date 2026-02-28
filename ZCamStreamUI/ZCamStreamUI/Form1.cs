@@ -18,7 +18,10 @@ namespace com.khelai.ZCamStreamUI
         private const int QUERY_INTERVAL = 1000;
         private const String MDNS_SERVICE_NAME = "_eagle._tcp.local";
         private bool _isLoadingSettings;
-        private Process _zcamProcess;
+        private bool _isAsyncClosing = false;
+
+        private ZCamNativeProcess? _zcamProcess = new ZCamNativeProcess(
+            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ZCamNative.exe"));
 
         // Stores video settings per camera IP
         private readonly Dictionary<string, VideoSettings> _videoSettings
@@ -233,10 +236,10 @@ namespace com.khelai.ZCamStreamUI
         {
             return new VideoSettings
             {
-                Stream = "Stream1",
+                Stream = "stream0",
                 Resolution = new VideoResolution { Width = 1920, Height = 1080 },
                 HwDecoding = true,
-                Codec = "HEVC"
+                Codec = "H264"
             };
         }
 
@@ -354,7 +357,7 @@ namespace com.khelai.ZCamStreamUI
             return path;
         }
 
-        private void OnClick_StartCamera(object sender, EventArgs e)
+        private async void OnClick_StartCamera(object sender, EventArgs e)
         {
             var selectedIps = GetSelectedCameraIps();
 
@@ -364,7 +367,6 @@ namespace com.khelai.ZCamStreamUI
                 return;
             }
 
-
             string jsonPath = WriteStreamsJson();
 
             if (!File.Exists(jsonPath))
@@ -372,47 +374,28 @@ namespace com.khelai.ZCamStreamUI
 
             try
             {
-                _zcamProcess = new Process
-                {
-                    StartInfo = new ProcessStartInfo
-                    {
-                        FileName = "ZCamNative.exe",
-                        Arguments = $"\"{jsonPath}\"",
-                        UseShellExecute = false,
-                        WorkingDirectory = AppDomain.CurrentDomain.BaseDirectory,
-                        RedirectStandardError = true,
-                        RedirectStandardOutput = true,
-                        CreateNoWindow = true
-                    },
-                    EnableRaisingEvents = true
-                };
-
-                _zcamProcess.Exited += (_, __) =>
-                {
-                    Invoke(() =>
-                    {
-                        MessageBox.Show("ZCamNative exited.");
-                    });
-                };
-
-                _zcamProcess.Start();
+                await _zcamProcess.RunAsync($"\"{jsonPath}\"", CancellationToken.None);
+            }
+            catch (OperationCanceledException)
+            {
+                // Do nothing or log it. 
+                // This is a "clean" exit triggered by your Stop button.
+                Logger.Info("ZCamNative Stopped by the User");
             }
             catch (Exception ex)
             {
+                // This is a REAL error (e.g., the .exe crashed or path is wrong)
                 MessageBox.Show("Failed to start ZCamNative.exe: " + ex.Message);
-                KillZcamProcess();
-            }
+                await KillZcamProcess();
+            }          
         }
 
-        private void KillZcamProcess()
+        private async Task KillZcamProcess()
         {
             try
             {
-                if (_zcamProcess != null && !_zcamProcess.HasExited)
-                {
-                    _zcamProcess.Kill(true); // kill entire process tree (.NET 5+)
-                    _zcamProcess.WaitForExit();
-                }
+                _zcamProcess?.Stop();
+                await Task.Delay(1000);
             }
             catch (Exception ex)
             {
@@ -425,9 +408,49 @@ namespace com.khelai.ZCamStreamUI
             }
         }
 
-        private void OnClick_Stop(object sender, EventArgs e)
+        private async void OnClick_Stop(object sender, EventArgs e)
         {
-            KillZcamProcess();
+            btnStop.Enabled = false;
+            await KillZcamProcess();
+            btnStop.Enabled = true;
+        }
+
+        private async void Form1_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            // If we've already done the cleanup, let the form close.
+            if (_isAsyncClosing) return;
+            if (_zcamProcess == null) return; // No process, no need to confirm or cleanup
+
+            var result = MessageBox.Show(
+                "A camera stream is active. Stop stream and exit?",
+                "Confirm Exit",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+
+            if (result == DialogResult.No)
+            {
+                e.Cancel = true;
+                return; // Exit here, form stays open
+            }
+
+            // 2. If we reach here, either process was null OR user clicked Yes
+            e.Cancel = true; // Stop the immediate close to allow async work
+
+            try
+            {
+                this.Enabled = false; // Prevent user interaction during cleanup
+                await KillZcamProcess(); // Your async cleanup
+            }
+            catch (Exception ex)
+            {
+                // Log error but proceed with closing so the app doesn't get stuck
+                Logger.Error("Cleanup failed: " + ex.Message);
+            }
+            finally
+            {
+                _isAsyncClosing = true;
+                this.Close(); // Trigger the second pass of FormClosing
+            }
         }
     }
 }

@@ -216,6 +216,7 @@
             Controls.Add(groupBoxVideo);
             Name = "Form1";
             Text = "Form1";
+            FormClosing += Form1_FormClosing;
             Load += Form1_Load;
             groupBoxVideo.ResumeLayout(false);
             groupBoxVideo.PerformLayout();

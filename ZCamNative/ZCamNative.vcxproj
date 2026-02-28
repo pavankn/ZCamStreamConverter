@@ -129,6 +129,16 @@
       <AdditionalLibraryDirectories>.\external\lib\ffmpeg;.\external\lib\libssp;.\external\lib\NDI;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>libsspd.lib;avcodec.lib;avformat.lib;avutil.lib;swscale.lib;nv12_to_bgra.lib;Processing.NDI.Lib.x64.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <PostBuildEvent>
+      <Command>copy $(SolutionDir)$(Platform)\$(Configuration)\ZCamNative.exe $(SolutionDir)$(SolutionName)\bin\$(Configuration)\net8.0-windows
+copy $(SolutionDir)$(Platform)\$(Configuration)\"*.dll" $(SolutionDir)$(SolutionName)\bin\$(Configuration)\net8.0-windows
+copy $(ProjectDir)external\bin\ffmpeg\"*.dll" $(SolutionDir)$(SolutionName)\bin\$(Configuration)\net8.0-windows
+copy $(ProjectDir)external\bin\libssp\"*.dll" $(SolutionDir)$(SolutionName)\bin\$(Configuration)\net8.0-windows
+copy $(ProjectDir)external\bin\NDI\"*.dll" $(SolutionDir)$(SolutionName)\bin\$(Configuration)\net8.0-windows
+copy $(ProjectDir)external\bin\ffmpeg\"*.dll" $(SolutionDir)$(Platform)\$(Configuration)
+copy $(ProjectDir)external\bin\libssp\"*.dll" $(SolutionDir)$(Platform)\$(Configuration)
+copy $(ProjectDir)external\bin\NDI\"*.dll" $(SolutionDir)$(Platform)\$(Configuration)</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -147,6 +157,16 @@
       <AdditionalLibraryDirectories>.\external\lib\ffmpeg;.\external\lib\libssp;.\external\lib\NDI;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>libssp.lib;avcodec.lib;avformat.lib;avutil.lib;swscale.lib;nv12_to_bgra.lib;Processing.NDI.Lib.x64.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <PostBuildEvent>
+      <Command>copy $(SolutionDir)$(Platform)\$(Configuration)\ZCamNative.exe $(SolutionDir)$(SolutionName)\bin\$(Configuration)\net8.0-windows
+copy $(SolutionDir)$(Platform)\$(Configuration)\"*.dll" $(SolutionDir)$(SolutionName)\bin\$(Configuration)\net8.0-windows
+copy $(ProjectDir)external\bin\ffmpeg\"*.dll" $(SolutionDir)$(SolutionName)\bin\$(Configuration)\net8.0-windows
+copy $(ProjectDir)external\bin\libssp\"*.dll" $(SolutionDir)$(SolutionName)\bin\$(Configuration)\net8.0-windows
+copy $(ProjectDir)external\bin\NDI\"*.dll" $(SolutionDir)$(SolutionName)\bin\$(Configuration)\net8.0-windows
+copy $(ProjectDir)external\bin\ffmpeg\"*.dll" $(SolutionDir)$(Platform)\$(Configuration)
+copy $(ProjectDir)external\bin\libssp\"*.dll" $(SolutionDir)$(Platform)\$(Configuration)
+copy $(ProjectDir)external\bin\NDI\"*.dll" $(SolutionDir)$(Platform)\$(Configuration)</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
