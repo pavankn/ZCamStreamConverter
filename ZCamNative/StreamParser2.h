@@ -14,8 +14,16 @@ namespace com_khelai_zcamnative
 {
 	class StreamParser2
 	{
-	public:
+	private:
+		static std::string getLastIpPart(const std::string& ip)
+		{
+			auto pos = ip.find_last_of('.');
+			if (pos == std::string::npos || pos + 1 >= ip.size())
+				throw std::runtime_error("Invalid IP address");
 
+			return ip.substr(pos + 1);
+		}
+	public:
 		static bool ParseJson(const char* jsonPath, std::vector<ClientInput>& clientInput) {
 
 			Logger log("zcam_native.log");
@@ -60,16 +68,20 @@ namespace com_khelai_zcamnative
 				_clientInput.stream = streamJson["Stream"];
 				_clientInput.ip = streamJson["Ip"];
 				_clientInput.decoderType = streamJson["HwDecoding"] ? DecoderType::HW_CUDA : DecoderType::SOFTWARE;
-				_clientInput.codecType = (streamJson["Codec"] == "H264") ? CodecType::H264 : CodecType::HEVC;
-				_clientInput.ndi_name = "KHEL_NDI_" + _clientInput.ip;
+				if (streamJson["Codec"] == "H264" || streamJson["Codec"] == "h264") {
+					_clientInput.codecType = CodecType::H264;
+				}else {
+					_clientInput.codecType = CodecType::HEVC;
+				}
+				_clientInput.ndi_name = std::string("KHEL_NDI_") + getLastIpPart(_clientInput.ip) ;
 				_clientInput.width = streamJson["Resolution"]["Width"];
 				_clientInput.height = streamJson["Resolution"]["Height"];
 
 				clientInput.push_back(_clientInput);
+				index++;
 			}
 			return true;
 		}
-
 	};
 }
 

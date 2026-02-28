@@ -238,6 +238,14 @@ static void on_disconnect()
 static std::vector<std::unique_ptr<ClientContext>> g_client_contexts;
 static std::vector<std::unique_ptr<imf::SspClient>> g_ssp_clients;
 
+static size_t WriteCallback(void* contents, size_t size,
+	size_t nmemb, void* userp)
+{
+	((std::string*)userp)->append(
+		(char*)contents, size * nmemb);
+	return size * nmemb;
+}
+
 class ZCamStreamBuilder {
 public:
 	ZCamStreamBuilder(const std::string& ip)
@@ -271,25 +279,57 @@ public:
 		return *this;
 	}
 
-	bool apply() {
-		std::string url = "http://" + ip_ + "/ctrl/stream_setting";
-		bool first = true;
-		for (const auto& pair : params_) {
-			url += (first ? "?" : "&") + pair.first + "=" + pair.second;
-			first = false;
+	bool apply()
+	{
+		Logger log("zcam_native.log");
+
+		for (int attempt = 0; attempt < 5; ++attempt)
+		{
+			CURL* curl = curl_easy_init();
+			if (!curl) return false;
+
+			std::string response;
+
+			std::string url =
+				"http://" + ip_ + "/ctrl/stream_setting";
+
+			bool first = true;
+			for (const auto& pair : params_)
+			{
+				char* enc =
+					curl_easy_escape(curl,
+						pair.second.c_str(), 0);
+
+				url += (first ? "?" : "&") +
+					pair.first + "=" + enc;
+
+				curl_free(enc);
+				first = false;
+			}
+
+			curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+			curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+			curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+			curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
+			curl_easy_setopt(curl, CURLOPT_USERAGENT, "Mozilla/5.0");
+
+			CURLcode res = curl_easy_perform(curl);
+			curl_easy_cleanup(curl);
+
+			if (res != CURLE_OK)
+				return false;
+
+			// SUCCESS
+			if (response.find("\"code\":0") != std::string::npos) {
+				log.info("Stream settings applied successfully for {} in attempt {} ", ip_, attempt);
+				return true;
+			}
+
+			// camera busy → retry
+			std::this_thread::sleep_for(std::chrono::milliseconds(500));
 		}
-
-		CURL* curl = curl_easy_init();
-		if (!curl) return false;
-
-		curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-		curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, 500L);
-		CURLcode res = curl_easy_perform(curl);
-		curl_easy_cleanup(curl);
-
-		return res == CURLE_OK;
-	}
-
+		return false;
+	}	
 
 private:
 	std::string ip_;
@@ -388,9 +428,9 @@ std::string enumToString(DecoderType type) {
 std::string codecToString(CodecType type) {
 	switch (type) {
 	case CodecType::H264:
-		return "H264";
+		return "h264";
 	case CodecType::HEVC:
-		return "H265";
+		return "h265";
 	default:
 		return "UNKNOWN";
 	}
@@ -409,10 +449,7 @@ int SetParams() {
 	for (int i = 0; i < found.size(); ++i) {
 		ZCamStreamBuilder builder(gClientInputs[i].ip);
 		bool success = builder.index(gClientInputs[i].stream)
-			.resolution(gClientInputs[i].width, gClientInputs[i].height)
-			.bitrate(10000000)
 			.encoder(codecToString(gClientInputs[i].codecType))
-			.fps(30)
 			.apply();
 
 		if (success) {

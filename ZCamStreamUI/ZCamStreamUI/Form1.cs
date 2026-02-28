@@ -1,5 +1,7 @@
 using System;
 using System.Threading.Tasks;
+using System.Diagnostics;
+using System.Security.Authentication.ExtendedProtection;
 
 namespace com.khelai.ZCamStreamUI
 {
@@ -16,6 +18,7 @@ namespace com.khelai.ZCamStreamUI
         private const int QUERY_INTERVAL = 1000;
         private const String MDNS_SERVICE_NAME = "_eagle._tcp.local";
         private bool _isLoadingSettings;
+        private Process _zcamProcess;
 
         // Stores video settings per camera IP
         private readonly Dictionary<string, VideoSettings> _videoSettings
@@ -136,7 +139,7 @@ namespace com.khelai.ZCamStreamUI
                     groupBoxVideo.Visible = false;
                 }
             }
-        }      
+        }
 
         private void AddCamera(string ip)
         {
@@ -299,7 +302,7 @@ namespace com.khelai.ZCamStreamUI
             if (comboBoxResolution.SelectedItem is VideoResolution res)
                 s.Resolution = res;
         }
-     
+
 
         private List<string> GetSelectedCameraIps()
         {
@@ -361,7 +364,70 @@ namespace com.khelai.ZCamStreamUI
                 return;
             }
 
-            string jsonPath = WriteStreamsJson();           
+
+            string jsonPath = WriteStreamsJson();
+
+            if (!File.Exists(jsonPath))
+                return;
+
+            try
+            {
+                _zcamProcess = new Process
+                {
+                    StartInfo = new ProcessStartInfo
+                    {
+                        FileName = "ZCamNative.exe",
+                        Arguments = $"\"{jsonPath}\"",
+                        UseShellExecute = false,
+                        WorkingDirectory = AppDomain.CurrentDomain.BaseDirectory,
+                        RedirectStandardError = true,
+                        RedirectStandardOutput = true,
+                        CreateNoWindow = true
+                    },
+                    EnableRaisingEvents = true
+                };
+
+                _zcamProcess.Exited += (_, __) =>
+                {
+                    Invoke(() =>
+                    {
+                        MessageBox.Show("ZCamNative exited.");
+                    });
+                };
+
+                _zcamProcess.Start();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Failed to start ZCamNative.exe: " + ex.Message);
+                KillZcamProcess();
+            }
+        }
+
+        private void KillZcamProcess()
+        {
+            try
+            {
+                if (_zcamProcess != null && !_zcamProcess.HasExited)
+                {
+                    _zcamProcess.Kill(true); // kill entire process tree (.NET 5+)
+                    _zcamProcess.WaitForExit();
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Failed to kill process: " + ex.Message);
+            }
+            finally
+            {
+                _zcamProcess?.Dispose();
+                _zcamProcess = null;
+            }
+        }
+
+        private void OnClick_Stop(object sender, EventArgs e)
+        {
+            KillZcamProcess();
         }
     }
 }

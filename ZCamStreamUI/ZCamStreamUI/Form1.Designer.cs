@@ -38,9 +38,10 @@
             comboBoxCodec = new ComboBox();
             comboBoxResolution = new ComboBox();
             groupBoxControl = new GroupBox();
+            btnStop = new Button();
+            btnStartCamera = new Button();
             btnScanCamera = new Button();
             grpBoxCameras = new GroupBox();
-            btnStartCamera = new Button();
             groupBoxVideo.SuspendLayout();
             groupBoxControl.SuspendLayout();
             SuspendLayout();
@@ -153,6 +154,7 @@
             // 
             // groupBoxControl
             // 
+            groupBoxControl.Controls.Add(btnStop);
             groupBoxControl.Controls.Add(btnStartCamera);
             groupBoxControl.Controls.Add(btnScanCamera);
             groupBoxControl.Dock = DockStyle.Bottom;
@@ -162,6 +164,26 @@
             groupBoxControl.TabIndex = 1;
             groupBoxControl.TabStop = false;
             groupBoxControl.Text = "groupBox1";
+            // 
+            // btnStop
+            // 
+            btnStop.Location = new Point(180, 84);
+            btnStop.Name = "btnStop";
+            btnStop.Size = new Size(94, 29);
+            btnStop.TabIndex = 2;
+            btnStop.Text = "Stop";
+            btnStop.UseVisualStyleBackColor = true;
+            btnStop.Click += OnClick_Stop;
+            // 
+            // btnStartCamera
+            // 
+            btnStartCamera.Location = new Point(27, 84);
+            btnStartCamera.Name = "btnStartCamera";
+            btnStartCamera.Size = new Size(94, 29);
+            btnStartCamera.TabIndex = 1;
+            btnStartCamera.Text = "Start";
+            btnStartCamera.UseVisualStyleBackColor = true;
+            btnStartCamera.Click += OnClick_StartCamera;
             // 
             // btnScanCamera
             // 
@@ -182,16 +204,6 @@
             grpBoxCameras.TabIndex = 2;
             grpBoxCameras.TabStop = false;
             grpBoxCameras.Text = "groupBox1";
-            // 
-            // btnStartCamera
-            // 
-            btnStartCamera.Location = new Point(27, 84);
-            btnStartCamera.Name = "btnStartCamera";
-            btnStartCamera.Size = new Size(94, 29);
-            btnStartCamera.TabIndex = 1;
-            btnStartCamera.Text = "Start";
-            btnStartCamera.UseVisualStyleBackColor = true;
-            btnStartCamera.Click += OnClick_StartCamera;
             // 
             // Form1
             // 
@@ -226,5 +238,6 @@
         private Label labelHW;
         private Label labelStream;
         private Button btnStartCamera;
+        private Button btnStop;
     }
 }
