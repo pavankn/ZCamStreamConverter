@@ -236,10 +236,10 @@ namespace com.khelai.ZCamStreamUI
         {
             return new VideoSettings
             {
-                Stream = "stream0",
+                Stream = "stream1",
                 Resolution = new VideoResolution { Width = 1920, Height = 1080 },
                 HwDecoding = true,
-                Codec = "H264"
+                Codec = "HEVC"
             };
         }
 
@@ -341,9 +341,18 @@ namespace com.khelai.ZCamStreamUI
         {
             var config = BuildStreamConfig();
 
-            string path = Path.Combine(
-                AppDomain.CurrentDomain.BaseDirectory,
-                "streams.json");
+            string appDataFolder = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "KhelAI", "ZCamStreamConverter");
+
+            // Ensure the folder exists before trying to use the file
+            if (!Directory.Exists(appDataFolder))
+            {
+                Directory.CreateDirectory(appDataFolder);
+            }
+
+            string path = Path.Combine(appDataFolder, "streams.json");
+            
 
             var json = System.Text.Json.JsonSerializer.Serialize(
                 config,
