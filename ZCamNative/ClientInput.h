@@ -12,7 +12,7 @@ extern "C" {
 
 #include <Processing.NDI.Lib.h>
 #include <mutex>
-
+#include "ClientConfig.h"
 
 enum class DecoderType {
 	SOFTWARE,
