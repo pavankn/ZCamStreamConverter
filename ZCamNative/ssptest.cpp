@@ -124,8 +124,8 @@ void handle_h264_data(ClientContext& ctx, struct imf::SspH264Data* h264) {
 	if (!ctx.codec_ctx) return;
 
 	AVPacket* pkt = av_packet_alloc();
-	pkt->data = h264->data;
-	pkt->size = h264->len;
+	av_new_packet(pkt, h264->len);
+	memcpy(pkt->data, h264->data, h264->len);
 
 	if (avcodec_send_packet(ctx.codec_ctx, pkt) < 0) {
 		av_packet_free(&pkt);
@@ -279,6 +279,11 @@ public:
 		return *this;
 	}
 
+	ZCamStreamBuilder& vfr(int value) {
+		params_["movvfr"] = std::to_string(value);
+		return *this;
+	}
+
 	bool apply()
 	{
 		Logger log("zcam_native.log");
@@ -331,7 +336,51 @@ public:
 			std::this_thread::sleep_for(std::chrono::milliseconds(500));
 		}
 		return false;
-	}	
+	}
+
+	bool set_vfr(int vfr)
+	{
+		CURL* curl = curl_easy_init();
+		if (!curl) return false;
+
+		std::string response;
+
+		std::string url =
+			"http://" + ip_ + "/ctrl/set?movvfr=" + std::to_string(vfr);
+
+		curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+		curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
+
+		CURLcode res = curl_easy_perform(curl);
+		curl_easy_cleanup(curl);
+
+		return (res == CURLE_OK &&
+			response.find("\"code\":0") != std::string::npos);
+	}
+
+	bool enable_vfr()
+	{
+		CURL* curl = curl_easy_init();
+		if (!curl) return false;
+
+		std::string response;
+
+		std::string url =
+			"http://" + ip_ + "/ctrl/set?rec_fps=VFR";
+
+		curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+		curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
+
+		CURLcode res = curl_easy_perform(curl);
+		curl_easy_cleanup(curl);
+
+		return (res == CURLE_OK &&
+			response.find("\"code\":0") != std::string::npos);
+	}
 
 private:
 	std::string ip_;
@@ -450,8 +499,14 @@ int SetParams() {
 
 	for (int i = 0; i < found.size(); ++i) {
 		ZCamStreamBuilder builder(gClientInputs[i].ip);
+
+		builder.set_vfr(120);
+
 		bool success = builder.index(gClientInputs[i].stream)
 			.encoder(codecToString(gClientInputs[i].codecType))
+			.fps(120)
+			.bitrate(23980000)
+			.index("stream0")
 			.apply();
 
 		if (success) {

@@ -122,6 +122,7 @@ namespace ZCamInstaller
             appDir.AddFile(new WixSharp.File(Path.Combine(mainUIPath, "Common.Logging.Core.dll")));
             appDir.AddFile(new WixSharp.File(Path.Combine(mainUIPath, "Common.Logging.dll")));
             appDir.AddFile(new WixSharp.File(Path.Combine(mainUIPath, "avcodec-62.dll")));
+            appDir.AddFile(new WixSharp.File(Path.Combine(mainUIPath, "avutil-60.dll")));
             appDir.AddFile(new WixSharp.File(Path.Combine(mainUIPath, "avdevice-62.dll")));
             appDir.AddFile(new WixSharp.File(Path.Combine(mainUIPath, "avformat-62.dll")));
             appDir.AddFile(new WixSharp.File(Path.Combine(mainUIPath, "avfilter-11.dll")));

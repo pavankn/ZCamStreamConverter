@@ -24,6 +24,9 @@
     <ClCompile Include="ssptest.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="FFmpegDecoder.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ClientConfig.h">
@@ -45,6 +48,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="StreamParser2.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="FFmpegDecoder.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

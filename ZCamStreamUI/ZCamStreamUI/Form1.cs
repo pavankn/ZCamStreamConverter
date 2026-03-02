@@ -236,7 +236,7 @@ namespace com.khelai.ZCamStreamUI
         {
             return new VideoSettings
             {
-                Stream = "stream1",
+                Stream = "stream0",
                 Resolution = new VideoResolution { Width = 1920, Height = 1080 },
                 HwDecoding = true,
                 Codec = "HEVC"
