@@ -19,4 +19,6 @@ typedef struct ClientConfig {
 	std::string ndi_name;
 	int width;
 	int height;
+	int fps;
+	int vfr;
 }ClientConfig;

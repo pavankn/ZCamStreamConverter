@@ -15,9 +15,6 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="ClientProcess.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="Logger.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -26,16 +23,10 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="ClientConfig.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="ClientProcessor.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Logger.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="StreamParser.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="ZCamStreamBuilder.h">
@@ -44,7 +35,7 @@
     <ClInclude Include="ClientInput.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="StreamParser2.h">
+    <ClInclude Include="StreamParser.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

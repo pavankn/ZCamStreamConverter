@@ -70,4 +70,6 @@ typedef struct {
 	std::string ndi_name;
 	int width;
 	int height;
+	int fps;
+	int vfr;
 } ClientInput;

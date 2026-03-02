@@ -15,7 +15,7 @@
 #include <algorithm>  // for std::min
 #include <map>
 #include <cstdio>
-#include "StreamParser2.h"
+#include "StreamParser.h"
 
 using namespace std::placeholders;
 using namespace com_khelai_zcamnative;
@@ -331,7 +331,28 @@ public:
 			std::this_thread::sleep_for(std::chrono::milliseconds(500));
 		}
 		return false;
-	}	
+	}
+	bool set_vfr(int vfr)
+	{
+		CURL* curl = curl_easy_init();
+		if (!curl) return false;
+
+		std::string response;
+
+		std::string url =
+			"http://" + ip_ + "/ctrl/set?movvfr=" + std::to_string(vfr);
+
+		curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+		curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
+
+		CURLcode res = curl_easy_perform(curl);
+		curl_easy_cleanup(curl);
+
+		return (res == CURLE_OK &&
+			response.find("\"code\":0") != std::string::npos);
+	}
 
 private:
 	std::string ip_;
@@ -450,14 +471,16 @@ int SetParams() {
 
 	for (int i = 0; i < found.size(); ++i) {
 		ZCamStreamBuilder builder(gClientInputs[i].ip);
+		builder.set_vfr(gClientInputs[i].vfr);
 		bool success = builder.index(gClientInputs[i].stream)
 			.encoder(codecToString(gClientInputs[i].codecType))
+			.resolution(gClientInputs[i].width, gClientInputs[i].height)
+			.fps(gClientInputs[i].fps)
 			.apply();
 
 		if (success) {
 			log.info("Pavankn Stream settings applied successfully for: {} ", found[i]);
-		}
-		else {
+		}else {
 			log.error("Failed to apply stream settings for: {} ", found[i]);
 		}
 	}
@@ -477,7 +500,7 @@ int main(int argc, char** argv)
 
 	Logger log("zcam_native.log");
 
-	StreamParser2::ParseJson(argv[1], gClientInputs);
+	StreamParser::ParseJson(argv[1], gClientInputs);
 	if(gClientInputs.size() == 0)
 	{
 		log.error("No valid client inputs found in JSON. Exiting.");

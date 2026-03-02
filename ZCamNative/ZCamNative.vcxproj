@@ -19,21 +19,16 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="ClientProcess.cpp">
-      <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">/utf-8 %(AdditionalOptions)</AdditionalOptions>
-    </ClCompile>
     <ClCompile Include="Logger.cpp">
       <AdditionalOptions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <ClCompile Include="ssptest.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="ClientConfig.h" />
     <ClInclude Include="ClientInput.h" />
     <ClInclude Include="ClientProcessor.h" />
     <ClInclude Include="Logger.h" />
     <ClInclude Include="StreamParser.h" />
-    <ClInclude Include="StreamParser2.h" />
     <ClInclude Include="ZCamStreamBuilder.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">

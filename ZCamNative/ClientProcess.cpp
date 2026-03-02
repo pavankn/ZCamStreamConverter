@@ -1,4 +1,5 @@
 #include "ClientProcessor.h"
+#include "Logger.h"
 
 using namespace std::placeholders;
 
