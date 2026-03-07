@@ -15,6 +15,7 @@
 #include <algorithm>  // for std::min
 #include <map>
 #include <cstdio>
+#include <fcntl.h>
 #include "StreamParser.h"
 
 using namespace std::placeholders;
@@ -28,212 +29,8 @@ using namespace com_khelai_zcamnative;
 
 std::atomic<bool> running(true);
 std::mutex out_mutex;
+imf::Loop* gLoop = nullptr;
 
-bool init_decoder(ClientContext& ctx) {
-	std::string decoderName;
-	if (ctx.type == DecoderType::HW_CUDA) {
-		if (ctx.codecType == CodecType::H264) {
-			decoderName = "h264_cuvid";
-		}
-		else if (ctx.codecType == CodecType::HEVC) {
-			decoderName = "hevc_cuvid";
-		}
-		else {
-			return false;
-		}
-		ctx.codec = avcodec_find_decoder_by_name(decoderName.c_str());  // or "h264_nvdec"
-		if (!ctx.codec) {
-			printf("Client[%d] CUDA decoder not found\n", ctx.client_id);
-			return false;
-		}
-
-		ctx.codec_ctx = avcodec_alloc_context3(ctx.codec);
-		if (!ctx.codec_ctx) return false;
-
-		if (av_hwdevice_ctx_create(&ctx.hw_device_ctx, AV_HWDEVICE_TYPE_CUDA, nullptr, nullptr, 0) < 0) {
-			printf("Failed to create CUDA HW device for client %d\n", ctx.client_id);
-			return false;
-		}
-		ctx.codec_ctx->hw_device_ctx = av_buffer_ref(ctx.hw_device_ctx);
-
-		ctx.codec_ctx->get_format = [](AVCodecContext* ctx, const enum AVPixelFormat* pix_fmts) {
-			while (*pix_fmts != AV_PIX_FMT_NONE) {
-				if (*pix_fmts == AV_PIX_FMT_CUDA)
-					return *pix_fmts;
-				pix_fmts++;
-			}
-			return pix_fmts[0];
-			};
-	}
-	else {  // SOFTWARE
-		if (ctx.codecType == CodecType::H264) {
-			ctx.codec = avcodec_find_decoder(AV_CODEC_ID_H264);
-		}
-		else if (ctx.codecType == CodecType::HEVC) {
-			ctx.codec = avcodec_find_decoder(AV_CODEC_ID_HEVC);
-		}
-		else {
-			return false;
-		}
-
-		if (!ctx.codec) {
-			printf("Client[%d] software decoder not found\n", ctx.client_id);
-			return false;
-		}
-
-		ctx.codec_ctx = avcodec_alloc_context3(ctx.codec);
-		if (!ctx.codec_ctx) return false;
-	}
-
-	if (avcodec_open2(ctx.codec_ctx, ctx.codec, nullptr) < 0) {
-		printf("Could not open codec for client %d\n", ctx.client_id);
-		return false;
-	}
-
-	printf("Codec pixel format: %s\n", av_get_pix_fmt_name(ctx.codec_ctx->pix_fmt));
-
-	printf("Client[%d] decoder (%s) initialized.\n", ctx.client_id,
-		(ctx.type == DecoderType::HW_CUDA ? "HW_CUDA" : "SOFTWARE"));
-	return true;
-}
-
-// Don't forget to add a cleanup function for ClientContext to free CUDA resources
-void cleanup_client_context_cuda(ClientContext& ctx) {
-	/*if (ctx.d_bgra_frame) {
-		CHECK_CUDA(cudaFree(ctx.d_bgra_frame));
-		ctx.d_bgra_frame = nullptr;
-	}*/
-	ctx.cuda_resources_initialized = false;
-	// Also free AVFrame and SwsContext if they are kept for SW path
-	if (ctx.rgb_frame) {
-		av_frame_free(&ctx.rgb_frame);
-		ctx.rgb_frame = nullptr;
-	}
-	if (ctx.sws_ctx) {
-		sws_freeContext(ctx.sws_ctx);
-		ctx.sws_ctx = nullptr;
-	}
-	// Don't free ctx.codec_ctx or ctx.ndi_sender here, as they are managed externally
-}
-
-
-#if 1
-void handle_h264_data(ClientContext& ctx, struct imf::SspH264Data* h264) {
-	std::lock_guard<std::mutex> lock(ctx.decoder_mutex);
-
-	if (!ctx.codec_ctx) return;
-
-	AVPacket* pkt = av_packet_alloc();
-	pkt->data = h264->data;
-	pkt->size = h264->len;
-
-	if (avcodec_send_packet(ctx.codec_ctx, pkt) < 0) {
-		av_packet_free(&pkt);
-		return;
-	}
-
-	AVFrame* frame = av_frame_alloc();
-	AVFrame* hw_frame = nullptr;
-
-	while (true) {
-		int ret = avcodec_receive_frame(ctx.codec_ctx, frame);
-		if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
-			break;
-		if (ret < 0) break;
-
-		AVFrame* use_frame = frame;
-		printf("Decoded frame %d size %dx%d\n", h264->frm_no, frame->width, frame->height);
-
-		// If hardware decode, transfer to system memory
-		if (ctx.type == DecoderType::HW_CUDA) {
-			if (!hw_frame) hw_frame = av_frame_alloc();
-			if (av_hwframe_transfer_data(hw_frame, frame, 0) < 0) {
-				printf("Failed to transfer HW frame to CPU\n");
-				break;
-			}
-			use_frame = hw_frame;
-		}
-
-		// Prepare or reallocate RGB frame
-		if (!ctx.rgb_frame || ctx.last_width != use_frame->width || ctx.last_height != use_frame->height) {
-			if (ctx.rgb_frame) av_frame_free(&ctx.rgb_frame);
-			if (ctx.sws_ctx) sws_freeContext(ctx.sws_ctx);
-
-			ctx.rgb_frame = av_frame_alloc();
-			ctx.rgb_frame->format = AV_PIX_FMT_BGRA;
-			ctx.rgb_frame->width = use_frame->width;
-			ctx.rgb_frame->height = use_frame->height;
-			av_frame_get_buffer(ctx.rgb_frame, 32);
-
-			ctx.sws_ctx = sws_getContext(
-				use_frame->width, use_frame->height,
-				(AVPixelFormat)use_frame->format,
-				ctx.rgb_frame->width, ctx.rgb_frame->height,
-				AV_PIX_FMT_BGRA, SWS_BILINEAR, nullptr, nullptr, nullptr);
-
-			if (!ctx.sws_ctx) {
-				printf("sws_getContext failed for client %d\n", ctx.client_id);
-				break;
-			}
-
-			ctx.last_width = use_frame->width;
-			ctx.last_height = use_frame->height;
-		}
-
-		sws_scale(ctx.sws_ctx,
-			use_frame->data, use_frame->linesize,
-			0, use_frame->height,
-			ctx.rgb_frame->data, ctx.rgb_frame->linesize);
-
-		NDIlib_video_frame_v2_t ndi_frame;
-		ndi_frame.xres = ctx.rgb_frame->width;
-		ndi_frame.yres = ctx.rgb_frame->height;
-		ndi_frame.FourCC = NDIlib_FourCC_type_BGRA;
-		ndi_frame.frame_rate_N = 240000;
-		ndi_frame.frame_rate_D = 1001;
-		ndi_frame.picture_aspect_ratio = (float)ctx.rgb_frame->width / ctx.rgb_frame->height;
-		ndi_frame.timecode = NDIlib_send_timecode_synthesize;
-		ndi_frame.p_data = ctx.rgb_frame->data[0];
-		ndi_frame.line_stride_in_bytes = ctx.rgb_frame->linesize[0];
-
-		NDIlib_send_send_video_v2(ctx.ndi_sender, &ndi_frame);
-
-		av_frame_unref(frame);
-		if (hw_frame) av_frame_unref(hw_frame);
-	}
-
-	if (hw_frame) av_frame_free(&hw_frame);
-	av_frame_free(&frame);
-	av_packet_free(&pkt);
-}
-#endif
-
-static void on_audio_data_1(struct imf::SspAudioData* audio)
-{
-
-}
-
-static void on_audio_data_2(struct imf::SspAudioData* audio)
-{
-
-}
-
-static void on_meta_1(struct imf::SspVideoMeta* v, struct imf::SspAudioMeta* a, struct imf::SspMeta* m)
-{
-	printf("on meta 1 wall clock %d", m->pts_is_wall_clock);
-	printf("              video %dx%d %d/%d\n", v->width, v->height, v->unit, v->timescale);
-	printf("              audio %d\n", a->sample_rate);
-}
-
-static void on_meta_2(struct imf::SspVideoMeta* v, struct imf::SspAudioMeta* a, struct imf::SspMeta* m)
-{
-
-}
-
-static void on_disconnect()
-{
-	printf("on disconnect\n");
-}
 
 static std::vector<std::unique_ptr<ClientContext>> g_client_contexts;
 static std::vector<std::unique_ptr<imf::SspClient>> g_ssp_clients;
@@ -264,7 +61,7 @@ public:
 		return *this;
 	}
 
-	ZCamStreamBuilder& bitrate(int bps) {
+	ZCamStreamBuilder& bitrate(uint32_t bps) {
 		params_["bitrate"] = std::to_string(bps);
 		return *this;
 	}
@@ -282,54 +79,46 @@ public:
 	bool apply()
 	{
 		Logger log("zcam_native.log");
+				
+		CURL* curl = curl_easy_init();
+		if (!curl) return false;
 
-		for (int attempt = 0; attempt < 5; ++attempt)
+		std::string response;
+
+		std::string url =
+			"http://" + ip_ + "/ctrl/stream_setting";
+
+		bool first = true;
+		for (const auto& pair : params_)
 		{
-			CURL* curl = curl_easy_init();
-			if (!curl) return false;
+			char* enc =
+				curl_easy_escape(curl,
+					pair.second.c_str(), 0);
 
-			std::string response;
+			url += (first ? "?" : "&") +
+				pair.first + "=" + enc;
 
-			std::string url =
-				"http://" + ip_ + "/ctrl/stream_setting";
-
-			bool first = true;
-			for (const auto& pair : params_)
-			{
-				char* enc =
-					curl_easy_escape(curl,
-						pair.second.c_str(), 0);
-
-				url += (first ? "?" : "&") +
-					pair.first + "=" + enc;
-
-				curl_free(enc);
-				first = false;
-			}
-
-			curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-			curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
-			curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
-			curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
-			curl_easy_setopt(curl, CURLOPT_USERAGENT, "Mozilla/5.0");
-
-			log.info("Performing Curl on URL {} in attempt {} ", url, attempt);
-
-			CURLcode res = curl_easy_perform(curl);
-			curl_easy_cleanup(curl);
-
-			if (res != CURLE_OK)
-				return false;
-
-			// SUCCESS
-			if (response.find("\"code\":0") != std::string::npos) {
-				log.info("Stream settings applied successfully for {} in attempt {} ", ip_, attempt);
-				return true;
-			}
-
-			// camera busy → retry
-			std::this_thread::sleep_for(std::chrono::milliseconds(500));
+			curl_free(enc);
+			first = false;
 		}
+
+		curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+		curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
+		curl_easy_setopt(curl, CURLOPT_USERAGENT, "Mozilla/5.0");
+
+		CURLcode res = curl_easy_perform(curl);
+		curl_easy_cleanup(curl);
+
+		if (res != CURLE_OK)
+			return false;
+
+		// SUCCESS
+		if (response.find("\"code\":0") != std::string::npos) {
+			return true;
+		}
+
 		return false;
 	}
 	bool set_vfr(int vfr)
@@ -353,11 +142,414 @@ public:
 		return (res == CURLE_OK &&
 			response.find("\"code\":0") != std::string::npos);
 	}
+	bool set_resolution(std::string resolution)
+	{
+		CURL* curl = curl_easy_init();
+		if (!curl) return false;
+
+		std::string response;
+
+		std::string url =
+			"http://" + ip_ + "/ctrl/set?resolution=" + resolution;
+
+		curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+		curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
+
+		CURLcode res = curl_easy_perform(curl);
+		curl_easy_cleanup(curl);
+
+		return (res == CURLE_OK &&
+			response.find("\"code\":0") != std::string::npos);
+	}
+	bool set_video_encoder(std::string videoencoder)
+	{
+		CURL* curl = curl_easy_init();
+		if (!curl) return false;
+
+		std::string response;
+
+		std::string url =
+			"http://" + ip_ + "/ctrl/set?video_encoder=" + videoencoder;
+
+		curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+		curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
+
+		CURLcode res = curl_easy_perform(curl);
+		curl_easy_cleanup(curl);
+
+		return (res == CURLE_OK &&
+			response.find("\"code\":0") != std::string::npos);
+	}
+
+	bool set_stream(std::string streamindex)
+	{
+		CURL* curl = curl_easy_init();
+		if (!curl) return false;
+
+		std::string response;
+
+		std::string url =
+			"http://" + ip_ + "/ctrl/set?send_stream=" + streamindex;
+
+		curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
+		curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
+
+		CURLcode res = curl_easy_perform(curl);
+		curl_easy_cleanup(curl);
+
+		return (res == CURLE_OK &&
+			response.find("\"code\":0") != std::string::npos);
+	}
 
 private:
 	std::string ip_;
 	std::map<std::string, std::string> params_;
 };
+
+
+bool init_decoder(ClientContext& ctx) {
+	Logger log("zcam_native.log");
+
+	std::string decoderName;
+	DecoderType decoderType = ctx.clientConfig.decoderType;
+	CodecType codecType = ctx.clientConfig.codecType;
+
+	// Video
+	if (decoderType == DecoderType::HW_CUDA) {
+		if (codecType == CodecType::H264) {
+			decoderName = "h264_cuvid";
+		}
+		else if (codecType == CodecType::HEVC) {
+			decoderName = "hevc_cuvid";
+		}
+		else {
+			return false;
+		}
+		ctx.codec = avcodec_find_decoder_by_name(decoderName.c_str());  // or "h264_nvdec"
+		if (!ctx.codec) {
+			log.error("Client[%d] CUDA decoder not found\n", ctx.client_id);
+			return false;
+		}
+
+		ctx.codec_ctx = avcodec_alloc_context3(ctx.codec);
+		if (!ctx.codec_ctx) return false;
+
+		if (av_hwdevice_ctx_create(&ctx.hw_device_ctx, AV_HWDEVICE_TYPE_CUDA, nullptr, nullptr, 0) < 0) {
+			log.error("Failed to create CUDA HW device for client %d\n", ctx.client_id);
+			return false;
+		}
+		ctx.codec_ctx->hw_device_ctx = av_buffer_ref(ctx.hw_device_ctx);
+
+		ctx.codec_ctx->get_format = [](AVCodecContext* ctx, const enum AVPixelFormat* pix_fmts) {
+			while (*pix_fmts != AV_PIX_FMT_NONE) {
+				if (*pix_fmts == AV_PIX_FMT_CUDA)
+					return *pix_fmts;
+				pix_fmts++;
+			}
+			return pix_fmts[0];
+			};
+	}
+	else {  // SOFTWARE
+		if (codecType == CodecType::H264) {
+			ctx.codec = avcodec_find_decoder(AV_CODEC_ID_H264);
+		}
+		else if (codecType == CodecType::HEVC) {
+			ctx.codec = avcodec_find_decoder(AV_CODEC_ID_HEVC);
+		}
+		else {
+			return false;
+		}
+
+		if (!ctx.codec) {
+			log.error("Client[%d] software decoder not found\n", ctx.client_id);
+			return false;
+		}
+
+		ctx.codec_ctx = avcodec_alloc_context3(ctx.codec);
+		if (!ctx.codec_ctx) return false;
+	}
+
+	if (avcodec_open2(ctx.codec_ctx, ctx.codec, nullptr) < 0) {
+		log.error("Could not open codec for client %d\n", ctx.client_id);
+		return false;
+	}
+
+	log.info("Codec pixel format: %s\n", av_get_pix_fmt_name(ctx.codec_ctx->pix_fmt));
+
+	log.info("Client[%d] Video decoder (%s) initialized.\n", ctx.client_id,
+		(decoderType == DecoderType::HW_CUDA ? "HW_CUDA" : "SOFTWARE"));
+
+
+	// Audio
+	ctx.audio_codec = avcodec_find_decoder(AV_CODEC_ID_AAC);
+	ctx.audio_codec_ctx = avcodec_alloc_context3(ctx.audio_codec);
+	if (avcodec_open2(ctx.audio_codec_ctx, ctx.audio_codec, nullptr) < 0)
+	{
+		log.error("Failed to open audio decoder\n");
+		return false;
+	}
+	log.info("Client[%d]AudioDecoder Initialized \n", ctx.client_id);
+
+	return true;
+}
+
+// Don't forget to add a cleanup function for ClientContext to free CUDA resources
+void cleanup_client_context_cuda(ClientContext& ctx) {
+	/*if (ctx.d_bgra_frame) {
+		CHECK_CUDA(cudaFree(ctx.d_bgra_frame));
+		ctx.d_bgra_frame = nullptr;
+	}*/
+	// Also free AVFrame and SwsContext if they are kept for SW path
+	if (ctx.rgb_frame) {
+		av_frame_free(&ctx.rgb_frame);
+		ctx.rgb_frame = nullptr;
+	}
+	if (ctx.sws_ctx) {
+		sws_freeContext(ctx.sws_ctx);
+		ctx.sws_ctx = nullptr;
+	}
+	// Don't free ctx.codec_ctx or ctx.ndi_sender here, as they are managed externally
+}
+
+static void send_audio_to_ndi(ClientContext* ctx, AVFrame* frame)
+{
+	NDIlib_audio_frame_v3_t ndi_audio = { 0 };
+
+	int samples = frame->nb_samples;
+	int channels = frame->ch_layout.nb_channels;
+
+	size_t stride = samples * sizeof(float);
+	size_t required = channels * stride;
+
+	// grow buffer if needed
+	if (required > ctx->audio_buffer_size)
+	{
+		if (ctx->audio_buffer)
+			free(ctx->audio_buffer);
+
+		ctx->audio_buffer = (uint8_t*)malloc(required);
+		ctx->audio_buffer_size = required;
+	}
+
+	// copy planar channels
+	for (int c = 0; c < channels; c++)
+	{
+		memcpy(
+			ctx->audio_buffer + c * stride,
+			frame->data[c],
+			stride
+		);
+	}
+
+	ndi_audio.sample_rate = frame->sample_rate;
+	ndi_audio.no_channels = channels;
+	ndi_audio.no_samples = samples;
+
+	ndi_audio.channel_stride_in_bytes = stride;
+
+	ndi_audio.timecode = NDIlib_send_timecode_synthesize;
+
+	ndi_audio.p_data = ctx->audio_buffer;
+
+	NDIlib_send_send_audio_v3(ctx->ndi_sender, &ndi_audio);
+}
+
+void decode_audio(ClientContext* ctx, const std::vector<uint8_t>& pkt)
+{
+	AVPacket* packet = av_packet_alloc();
+
+	packet->data = (uint8_t*)pkt.data();
+	packet->size = pkt.size();
+
+	if (avcodec_send_packet(ctx->audio_codec_ctx, packet) < 0)
+	{
+		av_packet_free(&packet);
+		return;
+	}
+
+	if (!ctx->audio_frame)
+		ctx->audio_frame = av_frame_alloc();
+
+	static int index = 0;
+
+	while (true)
+	{
+		int ret = avcodec_receive_frame(
+			ctx->audio_codec_ctx,
+			ctx->audio_frame
+		);
+
+		if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+			break;
+
+		if (ret < 0)
+			break;
+
+		send_audio_to_ndi(ctx, ctx->audio_frame);
+
+		printf(
+			"Decoded Audio frame: %d samples=%d channels=%d\n",
+			index++,
+			ctx->audio_frame->nb_samples,
+			ctx->audio_frame->ch_layout.nb_channels
+		);
+	}
+
+	av_packet_free(&packet);
+}
+
+void video_decode_worker(ClientContext* ctx)
+{
+	while (ctx->running)
+	{
+		VideoPacket videoPacket;
+
+		{
+			std::unique_lock<std::mutex> lock(ctx->video_packet_mutex);
+
+			ctx->video_packet_cv.wait(lock, [&] {
+				return !ctx->video_packet_queue.empty() || !ctx->running;
+				});
+
+			if (!ctx->running)
+				break;
+
+			videoPacket = ctx->video_packet_queue.front();
+			ctx->video_packet_queue.pop();
+		}
+
+		AVPacket* avpkt = av_packet_alloc();
+		avpkt->data = videoPacket.pkt.data();
+		avpkt->size = videoPacket.pkt.size();
+
+		if (avcodec_send_packet(ctx->codec_ctx, avpkt) < 0)
+		{
+			av_packet_free(&avpkt);
+			continue;
+		}
+
+		AVFrame* frame = av_frame_alloc();
+		DecoderType decoderType = ctx->clientConfig.decoderType;
+		CodecType codecType = ctx->clientConfig.codecType;
+		AVFrame* hw_frame = nullptr;
+		int index = 0;
+
+		while (true) {
+			int ret = avcodec_receive_frame(ctx->codec_ctx, frame);
+			if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+				break;
+			if (ret < 0) break;
+
+			AVFrame* use_frame = frame;
+			printf("Decoded frame %d size %dx%d\n", videoPacket.frameno, frame->width, frame->height);
+
+			// If hardware decode, transfer to system memory
+			if (decoderType == DecoderType::HW_CUDA) {
+				if (!hw_frame) {
+					hw_frame = av_frame_alloc();
+				}
+				if (av_hwframe_transfer_data(hw_frame, frame, 0) < 0) {
+					printf("Failed to transfer HW frame to CPU\n");
+					break;
+				}
+				use_frame = hw_frame;
+			}
+
+			// Prepare or reallocate RGB frame
+			if (!ctx->rgb_frame || ctx->last_width != use_frame->width || ctx->last_height != use_frame->height) {
+				if (ctx->rgb_frame) av_frame_free(&ctx->rgb_frame);
+				if (ctx->sws_ctx) sws_freeContext(ctx->sws_ctx);
+
+				ctx->rgb_frame = av_frame_alloc();
+				ctx->rgb_frame->format = AV_PIX_FMT_BGRA;
+				ctx->rgb_frame->width = use_frame->width;
+				ctx->rgb_frame->height = use_frame->height;
+				av_frame_get_buffer(ctx->rgb_frame, 32);
+
+				ctx->sws_ctx = sws_getContext(
+					use_frame->width, use_frame->height,
+					(AVPixelFormat)use_frame->format,
+					ctx->rgb_frame->width, ctx->rgb_frame->height,
+					AV_PIX_FMT_BGRA, SWS_BILINEAR, nullptr, nullptr, nullptr);
+
+				if (!ctx->sws_ctx) {
+					printf("sws_getContext failed for client %d\n", ctx->client_id);
+					break;
+				}
+
+				ctx->last_width = use_frame->width;
+				ctx->last_height = use_frame->height;
+			}
+
+			sws_scale(ctx->sws_ctx,
+				use_frame->data, use_frame->linesize,
+				0, use_frame->height,
+				ctx->rgb_frame->data, ctx->rgb_frame->linesize);
+
+			NDIlib_video_frame_v2_t ndi_frame;
+			ndi_frame.xres = ctx->rgb_frame->width;
+			ndi_frame.yres = ctx->rgb_frame->height;
+			ndi_frame.FourCC = NDIlib_FourCC_type_BGRA;
+			ndi_frame.frame_rate_N = 240000;
+			ndi_frame.frame_rate_D = 1001;
+			ndi_frame.picture_aspect_ratio = (float)ctx->rgb_frame->width / ctx->rgb_frame->height;
+			ndi_frame.timecode = NDIlib_send_timecode_synthesize;
+			ndi_frame.p_data = ctx->rgb_frame->data[0];
+			ndi_frame.line_stride_in_bytes = ctx->rgb_frame->linesize[0];
+
+			NDIlib_send_send_video_v2(ctx->ndi_sender, &ndi_frame);
+
+			av_frame_unref(frame);
+			if (hw_frame) av_frame_unref(hw_frame);
+		}
+
+		av_frame_free(&frame);
+		av_packet_free(&avpkt);
+		if (hw_frame) {
+			av_frame_free(&hw_frame);
+		}
+	}
+}
+
+static void on_audio_data_1(struct imf::SspAudioData* audio)
+{
+
+}
+
+static void on_audio_data_2(struct imf::SspAudioData* audio)
+{
+
+}
+
+static void on_meta_1(struct imf::SspVideoMeta* vmeta, struct imf::SspAudioMeta* ameta, struct imf::SspMeta* m)
+{	
+	printf("Video Meta received: %dx%d  %d/%d, Encoder: %d\n",
+		vmeta->width,
+		vmeta->height,
+		vmeta->unit,
+		vmeta->timescale,
+		vmeta->encoder);
+
+	printf("Audio Meta received, SampleRate: %d\n", ameta->sample_rate);
+}
+
+static void on_meta_2(struct imf::SspVideoMeta* v, struct imf::SspAudioMeta* a, struct imf::SspMeta* m)
+{
+
+}
+
+static void on_disconnect()
+{
+	printf("on disconnect\n");
+}
+
+
 
 static std::vector<ClientInput> gClientInputs;
 
@@ -366,6 +558,7 @@ static void setup(imf::Loop* loop)
 	// Define client inputs (IP + decoder type)	
 
 	const int client_count = gClientInputs.size();
+	int port = 9999;
 
 	for (int i = 0; i < client_count; ++i) {
 		const auto& input = gClientInputs[i];
@@ -373,9 +566,8 @@ static void setup(imf::Loop* loop)
 		// Create ClientContext
 		auto ctx = std::make_unique<ClientContext>();
 		ctx->client_id = i;
-		ctx->type = input.decoderType;
 		ctx->name = input.ndi_name;
-		ctx->codecType = input.codecType;
+		ctx->clientConfig.decoderType = input.decoderType;
 
 		// Initialize decoder
 		if (!init_decoder(*ctx)) {
@@ -396,16 +588,43 @@ static void setup(imf::Loop* loop)
 		ClientContext* ctx_ptr = ctx.get();
 
 		// Create SspClient
-		auto client = std::make_unique<imf::SspClient>(input.ip, loop, 0x400000);
-		client->init();
-		client->setOnH264DataCallback([ctx_ptr](imf::SspH264Data* h264) {
-			handle_h264_data(*ctx_ptr, h264);
+		auto client = std::make_unique<imf::SspClient>(input.ip, loop, 0x400000, port , 0);
+		client->init();		
+		client->setOnH264DataCallback(
+			[ctx_ptr](imf::SspH264Data* h264) 
+			{
+				std::vector<uint8_t> pkt(h264->len);
+				memcpy(pkt.data(), h264->data, h264->len);
+				{
+					std::lock_guard<std::mutex> lock(ctx_ptr->video_packet_mutex);
+
+					ctx_ptr->video_packet_queue.emplace(
+						VideoPacket{ std::move(pkt), h264->frm_no }
+					);
+				}
+				ctx_ptr->video_packet_cv.notify_one();
 			});
+
+		client->setOnAudioDataCallback(
+			[ctx_ptr](imf::SspAudioData* audio)
+			{
+				std::vector<uint8_t> pkt(audio->len);
+				memcpy(pkt.data(), audio->data, audio->len);
+
+				decode_audio(ctx_ptr, pkt);
+			});
+
 		client->setOnMetaCallback(on_meta_1);  // Optional: pass client ID
 		client->setOnDisconnectedCallback(on_disconnect);
-		client->setOnAudioDataCallback(on_audio_data_1);
+		client->setOnConnectionConnectedCallback([]() {
+			printf("SSP connected\n");
+		});
+		client->setOnExceptionCallback([](int code, const char* msg) {
+			printf("SSP error %d %s\n", code, msg);
+		});
 
 		client->start();
+		ctx->video_decode_thread = std::thread(video_decode_worker, ctx_ptr);
 
 		// Save for lifetime management
 		g_client_contexts.push_back(std::move(ctx));
@@ -463,26 +682,74 @@ std::string codecToString(CodecType type) {
 int SetParams() {
 	std::vector<std::string> found;
 	Logger log("zcam_native.log");
+	bool ret = false;
+	std::string video_encoder;
 
-	for(auto input : gClientInputs)
-		found.push_back(input.ip);
+	for (const auto& clientInput : gClientInputs)
+	{
+		ZCamStreamBuilder builder(clientInput.ip);
+		ret = builder.set_vfr(clientInput.vfr);
+		if (ret) {
+			log.info("[SetParams] VFR Success for {} ", clientInput.ip);
+		}else {
+			log.info("[SetParams] VFR Failure for {} ", clientInput.ip);
+		}
 
-	std::cout << "Z CAMs Found: " << found.size() << std::endl;
+		std::this_thread::sleep_for(std::chrono::milliseconds(500));
+		
+		ret = builder.set_resolution(std::to_string(clientInput.width) + "x" + std::to_string(clientInput.height));
+		if (ret) {
+			log.info("[SetParams] Stream Resolution Success for {} ", clientInput.ip);
+		}else {
+			log.info("[SetParams] Stream Resolution Failure for {} ", clientInput.ip);
+		}
+		std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
-	for (int i = 0; i < found.size(); ++i) {
-		ZCamStreamBuilder builder(gClientInputs[i].ip);
-		builder.set_vfr(gClientInputs[i].vfr);
-		bool success = builder.index(gClientInputs[i].stream)
-			.encoder(codecToString(gClientInputs[i].codecType))
-			.resolution(gClientInputs[i].width, gClientInputs[i].height)
-			.fps(gClientInputs[i].fps)
+		if (clientInput.codecType == CodecType::HEVC) {
+			video_encoder = "H.265";
+		}else {
+			video_encoder = "H.264";
+		}
+		ret = builder.set_video_encoder(video_encoder);
+		if (ret) {
+			log.info("[SetParams] VideoEncoder Success for {} ", clientInput.ip);
+		}
+		else {
+			log.info("[SetParams] VideoEncoder Failure for {} ", clientInput.ip);
+		}
+
+		std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+		ret = builder.set_stream("Stream0");
+		if (ret) {
+			log.info("[SetParams] set_stream 0 Success for {} ", clientInput.ip);
+		}
+		else {
+			log.info("[SetParams] set_stream 0 Failure for {} ", clientInput.ip);
+		}
+		std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+		ret = builder.set_stream("Stream1");
+		if (ret) {
+			log.info("[SetParams] set_stream 1 Success for {} ", clientInput.ip);
+		}
+		else {
+			log.info("[SetParams] set_stream 1 Failure for {} ", clientInput.ip);
+		}
+
+		std::this_thread::sleep_for(std::chrono::milliseconds(500));
+		ret = builder
+			.index(clientInput.stream)
+			.fps(clientInput.fps)
+			.bitrate(clientInput.bitrate)
 			.apply();
 
-		if (success) {
-			log.info("Pavankn Stream settings applied successfully for: {} ", found[i]);
+		if (ret) {
+			log.info("Stream settings applied successfully for: {} ", clientInput.ip);
 		}else {
-			log.error("Failed to apply stream settings for: {} ", found[i]);
+			log.error("Failed to apply stream settings for: {} ", clientInput.ip);
 		}
+		std::this_thread::sleep_for(std::chrono::milliseconds(500));
 	}
 
 	return 0;
@@ -521,4 +788,3 @@ int main(int argc, char** argv)
 	threadLooper->stop();
 	return 0;
 }
-

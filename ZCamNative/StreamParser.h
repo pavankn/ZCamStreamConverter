@@ -67,27 +67,35 @@ namespace com_khelai_zcamnative
 
 				ClientInput _clientInput;
 
-				if (!streamJson.contains("Ip") || !streamJson.contains("Stream") ||
-					!streamJson.contains("Codec") || !streamJson.contains("HwDecoding"))
+				if (!streamJson.contains("Ip") || !streamJson.contains("Codec"))
 				{
 					log.info("Skiiping Invalid Stream Config");
 					continue;
 				}
 				log.info("Found Streams, Now Start Parsing");
 
-				_clientInput.stream = streamJson["Stream"].get<std::string>();
+				
 				_clientInput.ip = streamJson["Ip"].get<std::string>();
 
 				bool hw = streamJson["HwDecoding"].get<bool>();
 				_clientInput.decoderType = hw ? DecoderType::HW_CUDA : DecoderType::SOFTWARE;
 
 				_clientInput.codecType = parseCodec(streamJson["Codec"].get<std::string>());
-				
+
+				if (_clientInput.codecType == CodecType::HEVC) {
+					_clientInput.stream = "stream0";
+				}else {
+					_clientInput.stream = "stream1";
+				}
+								
 				_clientInput.ndi_name = std::string("KHEL_NDI_") + getLastIpPart(_clientInput.ip) ;
 				_clientInput.width = streamJson["Resolution"]["Width"];
 				_clientInput.height = streamJson["Resolution"]["Height"];
 				_clientInput.fps = streamJson.value("Fps", 0);
 				_clientInput.vfr = streamJson.value("VFR", 0);
+				_clientInput.bitrate = streamJson.value("bitrate", 0);
+
+				_clientInput.bitrate *= 1024 * 1024;
 
 				clientInput.push_back(_clientInput);
 				index++;
