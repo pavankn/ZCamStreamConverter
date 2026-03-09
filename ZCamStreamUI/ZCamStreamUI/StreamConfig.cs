@@ -20,6 +20,9 @@ namespace com.khelai.ZCamStreamUI
         public VideoResolution Resolution { get; set; }
         public string Codec { get; set; }
         public bool HwDecoding { get; set; }
+        public int Bitrate { get; set; }
+        public int Fps { get; set; }
+        public int VFR { get; set; }
     }
 }
 

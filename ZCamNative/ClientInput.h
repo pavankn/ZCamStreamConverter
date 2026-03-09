@@ -14,6 +14,7 @@ extern "C" {
 #include <mutex>
 #include <queue>
 #include <condition_variable>
+#include "VFrameQueue.h"
 
 enum class DecoderType {
 	SOFTWARE,
@@ -38,9 +39,10 @@ typedef struct ClientInput {
 	int bitrate;
 } ClientConfig;
 
-
-typedef struct VideoPacket {
-	std::vector<uint8_t> pkt;
+typedef struct VideoPacket
+{
+	uint8_t* data;
+	size_t len;
 	uint32_t frameno;
 }VideoPacket;
 
@@ -55,6 +57,7 @@ struct ClientContext {
 	const AVCodec* codec = nullptr;
 	AVCodecContext* codec_ctx = nullptr;
 	AVBufferRef* hw_device_ctx = nullptr;
+	VFrameQueue<VideoPacket> videoQueue;
 
 	// Audio 
 	AVCodecContext* audio_codec_ctx = nullptr;

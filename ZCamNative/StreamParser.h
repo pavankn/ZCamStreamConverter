@@ -93,7 +93,7 @@ namespace com_khelai_zcamnative
 				_clientInput.height = streamJson["Resolution"]["Height"];
 				_clientInput.fps = streamJson.value("Fps", 0);
 				_clientInput.vfr = streamJson.value("VFR", 0);
-				_clientInput.bitrate = streamJson.value("bitrate", 0);
+				_clientInput.bitrate = streamJson.value("Bitrate", 0);
 
 				_clientInput.bitrate *= 1024 * 1024;
 

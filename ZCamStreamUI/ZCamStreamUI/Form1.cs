@@ -236,10 +236,13 @@ namespace com.khelai.ZCamStreamUI
         {
             return new VideoSettings
             {
-                Stream = "stream1",
+                Stream = "stream0",
                 Resolution = new VideoResolution { Width = 1920, Height = 1080 },
                 HwDecoding = true,
-                Codec = "HEVC"
+                Codec = "HEVC",
+                Bitrate = 240,
+                Fps = 30,
+                VFR = 120
             };
         }
 
@@ -330,7 +333,10 @@ namespace com.khelai.ZCamStreamUI
                     Stream = s.Stream,
                     Resolution = s.Resolution,
                     Codec = s.Codec,
-                    HwDecoding = s.HwDecoding
+                    HwDecoding = s.HwDecoding,
+                    Bitrate = s.Bitrate,
+                    Fps = s.Fps,
+                    VFR = s.VFR
                 });
             }
 

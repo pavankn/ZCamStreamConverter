@@ -38,5 +38,8 @@
     <ClInclude Include="StreamParser.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="VFrameQueue.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

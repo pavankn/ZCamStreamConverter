@@ -233,7 +233,7 @@ bool init_decoder(ClientContext& ctx) {
 		}
 		ctx.codec = avcodec_find_decoder_by_name(decoderName.c_str());  // or "h264_nvdec"
 		if (!ctx.codec) {
-			log.error("Client[%d] CUDA decoder not found\n", ctx.client_id);
+			log.error("Client[{}] CUDA decoder not found", ctx.client_id);
 			return false;
 		}
 
@@ -241,7 +241,7 @@ bool init_decoder(ClientContext& ctx) {
 		if (!ctx.codec_ctx) return false;
 
 		if (av_hwdevice_ctx_create(&ctx.hw_device_ctx, AV_HWDEVICE_TYPE_CUDA, nullptr, nullptr, 0) < 0) {
-			log.error("Failed to create CUDA HW device for client %d\n", ctx.client_id);
+			log.error("Failed to create CUDA HW device for client {}", ctx.client_id);
 			return false;
 		}
 		ctx.codec_ctx->hw_device_ctx = av_buffer_ref(ctx.hw_device_ctx);
@@ -267,7 +267,7 @@ bool init_decoder(ClientContext& ctx) {
 		}
 
 		if (!ctx.codec) {
-			log.error("Client[%d] software decoder not found\n", ctx.client_id);
+			log.error("Client[{}] software decoder not found", ctx.client_id);
 			return false;
 		}
 
@@ -276,15 +276,12 @@ bool init_decoder(ClientContext& ctx) {
 	}
 
 	if (avcodec_open2(ctx.codec_ctx, ctx.codec, nullptr) < 0) {
-		log.error("Could not open codec for client %d\n", ctx.client_id);
+		log.error("Could not open codec for client {}", ctx.client_id);
 		return false;
 	}
 
-	log.info("Codec pixel format: %s\n", av_get_pix_fmt_name(ctx.codec_ctx->pix_fmt));
-
-	log.info("Client[%d] Video decoder (%s) initialized.\n", ctx.client_id,
+	log.info("Client {} Video decoder {} initialized ", ctx.client_id,
 		(decoderType == DecoderType::HW_CUDA ? "HW_CUDA" : "SOFTWARE"));
-
 
 	// Audio
 	ctx.audio_codec = avcodec_find_decoder(AV_CODEC_ID_AAC);
@@ -294,7 +291,7 @@ bool init_decoder(ClientContext& ctx) {
 		log.error("Failed to open audio decoder\n");
 		return false;
 	}
-	log.info("Client[%d]AudioDecoder Initialized \n", ctx.client_id);
+	log.info("Client {} AudioDecoder Initialized", ctx.client_id);
 
 	return true;
 }
@@ -391,130 +388,119 @@ void decode_audio(ClientContext* ctx, const std::vector<uint8_t>& pkt)
 		if (ret < 0)
 			break;
 
-		send_audio_to_ndi(ctx, ctx->audio_frame);
-
-		printf(
-			"Decoded Audio frame: %d samples=%d channels=%d\n",
-			index++,
-			ctx->audio_frame->nb_samples,
-			ctx->audio_frame->ch_layout.nb_channels
-		);
+		send_audio_to_ndi(ctx, ctx->audio_frame);		
 	}
 
 	av_packet_free(&packet);
 }
 
-void video_decode_worker(ClientContext* ctx)
+void decode_video(ClientContext* ctx, VideoPacket* pkt)
 {
-	while (ctx->running)
+	static Logger log("zcam_native.log");
+
+	if (!ctx || !pkt || !ctx->running)
+		return;
+
+	AVPacket* avpkt = av_packet_alloc();
+	av_new_packet(avpkt, pkt->len);
+	memcpy(avpkt->data, pkt->data, pkt->len);
+
+	if (avcodec_send_packet(ctx->codec_ctx, avpkt) < 0)
 	{
-		VideoPacket videoPacket;
-
-		{
-			std::unique_lock<std::mutex> lock(ctx->video_packet_mutex);
-
-			ctx->video_packet_cv.wait(lock, [&] {
-				return !ctx->video_packet_queue.empty() || !ctx->running;
-				});
-
-			if (!ctx->running)
-				break;
-
-			videoPacket = ctx->video_packet_queue.front();
-			ctx->video_packet_queue.pop();
-		}
-
-		AVPacket* avpkt = av_packet_alloc();
-		avpkt->data = videoPacket.pkt.data();
-		avpkt->size = videoPacket.pkt.size();
-
-		if (avcodec_send_packet(ctx->codec_ctx, avpkt) < 0)
-		{
-			av_packet_free(&avpkt);
-			continue;
-		}
-
-		AVFrame* frame = av_frame_alloc();
-		DecoderType decoderType = ctx->clientConfig.decoderType;
-		CodecType codecType = ctx->clientConfig.codecType;
-		AVFrame* hw_frame = nullptr;
-		int index = 0;
-
-		while (true) {
-			int ret = avcodec_receive_frame(ctx->codec_ctx, frame);
-			if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
-				break;
-			if (ret < 0) break;
-
-			AVFrame* use_frame = frame;
-			printf("Decoded frame %d size %dx%d\n", videoPacket.frameno, frame->width, frame->height);
-
-			// If hardware decode, transfer to system memory
-			if (decoderType == DecoderType::HW_CUDA) {
-				if (!hw_frame) {
-					hw_frame = av_frame_alloc();
-				}
-				if (av_hwframe_transfer_data(hw_frame, frame, 0) < 0) {
-					printf("Failed to transfer HW frame to CPU\n");
-					break;
-				}
-				use_frame = hw_frame;
-			}
-
-			// Prepare or reallocate RGB frame
-			if (!ctx->rgb_frame || ctx->last_width != use_frame->width || ctx->last_height != use_frame->height) {
-				if (ctx->rgb_frame) av_frame_free(&ctx->rgb_frame);
-				if (ctx->sws_ctx) sws_freeContext(ctx->sws_ctx);
-
-				ctx->rgb_frame = av_frame_alloc();
-				ctx->rgb_frame->format = AV_PIX_FMT_BGRA;
-				ctx->rgb_frame->width = use_frame->width;
-				ctx->rgb_frame->height = use_frame->height;
-				av_frame_get_buffer(ctx->rgb_frame, 32);
-
-				ctx->sws_ctx = sws_getContext(
-					use_frame->width, use_frame->height,
-					(AVPixelFormat)use_frame->format,
-					ctx->rgb_frame->width, ctx->rgb_frame->height,
-					AV_PIX_FMT_BGRA, SWS_BILINEAR, nullptr, nullptr, nullptr);
-
-				if (!ctx->sws_ctx) {
-					printf("sws_getContext failed for client %d\n", ctx->client_id);
-					break;
-				}
-
-				ctx->last_width = use_frame->width;
-				ctx->last_height = use_frame->height;
-			}
-
-			sws_scale(ctx->sws_ctx,
-				use_frame->data, use_frame->linesize,
-				0, use_frame->height,
-				ctx->rgb_frame->data, ctx->rgb_frame->linesize);
-
-			NDIlib_video_frame_v2_t ndi_frame;
-			ndi_frame.xres = ctx->rgb_frame->width;
-			ndi_frame.yres = ctx->rgb_frame->height;
-			ndi_frame.FourCC = NDIlib_FourCC_type_BGRA;
-			ndi_frame.frame_rate_N = 240000;
-			ndi_frame.frame_rate_D = 1001;
-			ndi_frame.picture_aspect_ratio = (float)ctx->rgb_frame->width / ctx->rgb_frame->height;
-			ndi_frame.timecode = NDIlib_send_timecode_synthesize;
-			ndi_frame.p_data = ctx->rgb_frame->data[0];
-			ndi_frame.line_stride_in_bytes = ctx->rgb_frame->linesize[0];
-
-			NDIlib_send_send_video_v2(ctx->ndi_sender, &ndi_frame);
-
-			av_frame_unref(frame);
-			if (hw_frame) av_frame_unref(hw_frame);
-		}
-
-		av_frame_free(&frame);
 		av_packet_free(&avpkt);
-		if (hw_frame) {
-			av_frame_free(&hw_frame);
-		}
+		free(pkt->data);
+		return;
 	}
+
+	AVFrame* frame = av_frame_alloc();
+	AVFrame* hw_frame = nullptr;
+
+	while (true)
+	{
+		int ret = avcodec_receive_frame(ctx->codec_ctx, frame);
+
+		if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+			break;
+
+		if (ret < 0)
+			break;
+
+		AVFrame* use_frame = frame;
+
+		if (ctx->clientConfig.decoderType == DecoderType::HW_CUDA)
+		{
+			if (!hw_frame)
+				hw_frame = av_frame_alloc();
+
+			if (av_hwframe_transfer_data(hw_frame, frame, 0) < 0)
+			{
+				log.error("Failed to transfer HW frame\n");
+				break;
+			}
+
+			use_frame = hw_frame;
+		}
+
+		if (!ctx->rgb_frame ||
+			ctx->last_width != use_frame->width ||
+			ctx->last_height != use_frame->height)
+		{
+			if (ctx->rgb_frame)
+				av_frame_free(&ctx->rgb_frame);
+
+			if (ctx->sws_ctx)
+				sws_freeContext(ctx->sws_ctx);
+
+			ctx->rgb_frame = av_frame_alloc();
+			ctx->rgb_frame->format = AV_PIX_FMT_BGRA;
+			ctx->rgb_frame->width = use_frame->width;
+			ctx->rgb_frame->height = use_frame->height;
+
+			av_frame_get_buffer(ctx->rgb_frame, 32);
+
+			ctx->sws_ctx = sws_getContext(
+				use_frame->width, use_frame->height,
+				(AVPixelFormat)use_frame->format,
+				ctx->rgb_frame->width, ctx->rgb_frame->height,
+				AV_PIX_FMT_BGRA,
+				SWS_BILINEAR, nullptr, nullptr, nullptr);
+
+			ctx->last_width = use_frame->width;
+			ctx->last_height = use_frame->height;
+		}
+
+		sws_scale(ctx->sws_ctx,
+			use_frame->data, use_frame->linesize,
+			0, use_frame->height,
+			ctx->rgb_frame->data, ctx->rgb_frame->linesize);
+
+		NDIlib_video_frame_v2_t ndi_frame;
+		ndi_frame.xres = ctx->rgb_frame->width;
+		ndi_frame.yres = ctx->rgb_frame->height;
+		ndi_frame.FourCC = NDIlib_FourCC_type_BGRA;
+		ndi_frame.frame_rate_N = 240000;
+		ndi_frame.frame_rate_D = 1001;
+		ndi_frame.picture_aspect_ratio =
+			(float)ctx->rgb_frame->width / ctx->rgb_frame->height;
+		ndi_frame.timecode = NDIlib_send_timecode_synthesize;
+		ndi_frame.p_data = ctx->rgb_frame->data[0];
+		ndi_frame.line_stride_in_bytes =
+			ctx->rgb_frame->linesize[0];
+
+		NDIlib_send_send_video_v2(ctx->ndi_sender, &ndi_frame);
+
+		av_frame_unref(frame);
+		if (hw_frame)
+			av_frame_unref(hw_frame);
+	}
+
+	av_frame_free(&frame);
+	av_packet_free(&avpkt);
+
+	if (hw_frame)
+		av_frame_free(&hw_frame);
+
+	//free(pkt->data);
 }
 
 static void on_audio_data_1(struct imf::SspAudioData* audio)
@@ -528,15 +514,17 @@ static void on_audio_data_2(struct imf::SspAudioData* audio)
 }
 
 static void on_meta_1(struct imf::SspVideoMeta* vmeta, struct imf::SspAudioMeta* ameta, struct imf::SspMeta* m)
-{	
-	printf("Video Meta received: %dx%d  %d/%d, Encoder: %d\n",
+{
+	Logger log("zcam_native.log");
+
+	log.info("Video Meta received: {}x{}  {}/{}, Encoder: {}\n",
 		vmeta->width,
 		vmeta->height,
 		vmeta->unit,
 		vmeta->timescale,
 		vmeta->encoder);
 
-	printf("Audio Meta received, SampleRate: %d\n", ameta->sample_rate);
+	log.info("Audio Meta received, SampleRate: {}", ameta->sample_rate);
 }
 
 static void on_meta_2(struct imf::SspVideoMeta* v, struct imf::SspAudioMeta* a, struct imf::SspMeta* m)
@@ -546,19 +534,19 @@ static void on_meta_2(struct imf::SspVideoMeta* v, struct imf::SspAudioMeta* a, 
 
 static void on_disconnect()
 {
-	printf("on disconnect\n");
+	Logger log("zcam_native.log");
+	log.info("on disconnect\n");
 }
-
-
 
 static std::vector<ClientInput> gClientInputs;
 
 static void setup(imf::Loop* loop)
 {
+	Logger log("zcam_native.log");
+
 	// Define client inputs (IP + decoder type)	
 
 	const int client_count = gClientInputs.size();
-	int port = 9999;
 
 	for (int i = 0; i < client_count; ++i) {
 		const auto& input = gClientInputs[i];
@@ -571,39 +559,50 @@ static void setup(imf::Loop* loop)
 
 		// Initialize decoder
 		if (!init_decoder(*ctx)) {
-			printf("Decoder init failed for client %d\n", i);
+			log.error("Decoder init failed for client %d\n", i);
 			continue;
-		}
+		}	
 
 		// Initialize NDI sender
 		NDIlib_send_create_t NDI_send_create_desc;
 		NDI_send_create_desc.p_ndi_name = ctx->name.c_str();
 		ctx->ndi_sender = NDIlib_send_create(&NDI_send_create_desc);
 		if (!ctx->ndi_sender) {
-			printf("Failed to create NDI sender for client %d\n", i);
+			log.error("Failed to create NDI sender for client %d\n", i);
 			continue;
 		}
 
 		// Save context pointer for lambda
 		ClientContext* ctx_ptr = ctx.get();
+	
+		auto client = std::make_unique<imf::SspClient>(
+			input.ip,
+			loop,
+			0x400000);
 
-		// Create SspClient
-		auto client = std::make_unique<imf::SspClient>(input.ip, loop, 0x400000, port , 0);
-		client->init();		
+		client->init();
+
 		client->setOnH264DataCallback(
-			[ctx_ptr](imf::SspH264Data* h264) 
+			[ctx_ptr](imf::SspH264Data* h264)
 			{
-				std::vector<uint8_t> pkt(h264->len);
-				memcpy(pkt.data(), h264->data, h264->len);
-				{
-					std::lock_guard<std::mutex> lock(ctx_ptr->video_packet_mutex);
+				uint8_t* copy = (uint8_t*)malloc(h264->len);
+				memcpy(copy, h264->data, h264->len);
 
-					ctx_ptr->video_packet_queue.emplace(
-						VideoPacket{ std::move(pkt), h264->frm_no }
-					);
-				}
-				ctx_ptr->video_packet_cv.notify_one();
-			});
+				VideoPacket pkt{ copy, h264->len, h264->frm_no };
+
+				ctx_ptr->videoQueue.enqueue(
+					pkt,
+					h264->pts,
+					h264->type == 5
+				);
+			}
+		);
+		ctx->videoQueue.setFrameCallback(
+			[ctx_ptr](VideoPacket* pkt)
+			{
+				decode_video(ctx_ptr, pkt);
+			}
+		);
 
 		client->setOnAudioDataCallback(
 			[ctx_ptr](imf::SspAudioData* audio)
@@ -617,21 +616,28 @@ static void setup(imf::Loop* loop)
 		client->setOnMetaCallback(on_meta_1);  // Optional: pass client ID
 		client->setOnDisconnectedCallback(on_disconnect);
 		client->setOnConnectionConnectedCallback([]() {
-			printf("SSP connected\n");
-		});
+			Logger log("zcam_native.log");
+			log.info("SSP connected\n");
+			});
 		client->setOnExceptionCallback([](int code, const char* msg) {
-			printf("SSP error %d %s\n", code, msg);
-		});
+			Logger log("zcam_native.log");
+			log.error("SSP error %d %s {} {}", code, msg);
+			});
+
+
+		log.info("Queue thread started for client {} ", ctx->client_id);
 
 		client->start();
-		ctx->video_decode_thread = std::thread(video_decode_worker, ctx_ptr);
+		ctx->videoQueue.start();
 
 		// Save for lifetime management
 		g_client_contexts.push_back(std::move(ctx));
 		g_ssp_clients.push_back(std::move(client));
 
-		printf("Started client %d: %s [%s]\n", i, input.ip.c_str(),
+		log.info("Started client {}: {} [{}] {} {} {}", i, input.ip.c_str(),
 			input.decoderType == DecoderType::HW_CUDA ? "HW_CUDA" : "SW");
+
+		std::this_thread::sleep_for(std::chrono::seconds(5));
 	}
 }
 
@@ -749,7 +755,6 @@ int SetParams() {
 		}else {
 			log.error("Failed to apply stream settings for: {} ", clientInput.ip);
 		}
-		std::this_thread::sleep_for(std::chrono::milliseconds(500));
 	}
 
 	return 0;
@@ -778,7 +783,6 @@ int main(int argc, char** argv)
 
 	std::unique_ptr<imf::ThreadLoop> threadLooper(new imf::ThreadLoop(std::bind(setup, _1)));
 	threadLooper->start();
-
 
 	while (1) {
 		std::this_thread::sleep_for(std::chrono::seconds(1));
