@@ -17,9 +17,13 @@
 #include <cstdio>
 #include <fcntl.h>
 #include "StreamParser.h"
+#include <DbgHelp.h>
+#include <Windows.h>
 
 using namespace std::placeholders;
 using namespace com_khelai_zcamnative;
+
+#pragma comment(lib, "Dbghelp.lib")
 
 #ifdef _DEBUG
 #pragma comment (lib, "libsspd.lib")
@@ -212,6 +216,86 @@ private:
 	std::map<std::string, std::string> params_;
 };
 
+static void cleanup_clients() {
+	for (auto& ctx : g_client_contexts) {
+		if (ctx->ndi_sender)
+			NDIlib_send_destroy(ctx->ndi_sender);
+		if (ctx->codec_ctx)
+			avcodec_free_context(&ctx->codec_ctx);
+		if (ctx->hw_device_ctx)
+			av_buffer_unref(&ctx->hw_device_ctx);
+		if (ctx->sws_ctx)
+			sws_freeContext(ctx->sws_ctx);
+		if (ctx->rgb_frame)
+			av_frame_free(&ctx->rgb_frame);
+
+		g_client_contexts.clear();
+		g_ssp_clients.clear();
+
+		ctx->ndi_running = false;
+		ctx->ndi_cv.notify_all();
+
+		if (ctx->ndi_thread.joinable())
+			ctx->ndi_thread.join();
+	}
+}
+
+
+void ndi_sender_thread(ClientContext* ctx)
+{
+	while (ctx->ndi_running)
+	{
+		NDIFrame frame;
+
+		{
+			std::unique_lock<std::mutex> lock(ctx->ndi_mutex);
+
+			ctx->ndi_cv.wait(lock, [&] {
+				return !ctx->ndi_queue.empty() || !ctx->ndi_running;
+				});
+
+			if (!ctx->ndi_running)
+				break;
+
+			frame = std::move(ctx->ndi_queue.front());
+			ctx->ndi_queue.pop();
+		}
+
+		NDIlib_video_frame_v2_t ndi_frame{};
+		ndi_frame.xres = frame.width;
+		ndi_frame.yres = frame.height;
+		ndi_frame.FourCC = NDIlib_FourCC_type_BGRA;
+
+		ndi_frame.frame_rate_N = 60000;
+		ndi_frame.frame_rate_D = 1001;
+
+		ndi_frame.picture_aspect_ratio =
+			(float)frame.width / frame.height;
+
+		ndi_frame.timecode = NDIlib_send_timecode_synthesize;
+
+		ndi_frame.p_data = frame.data.data();
+		ndi_frame.line_stride_in_bytes = frame.stride;
+
+		NDIlib_send_send_video_v2(ctx->ndi_sender, &ndi_frame);
+	}
+}
+
+bool init_ndi(ClientContext& ctx) {
+	Logger log("zcam_native.log");
+
+	// Initialize NDI sender
+	NDIlib_send_create_t NDI_send_create_desc;
+	NDI_send_create_desc.p_ndi_name = ctx.name.c_str();
+	ctx.ndi_sender = NDIlib_send_create(&NDI_send_create_desc);
+	if (!ctx.ndi_sender) {
+		log.error("Failed to create NDI sender for client %d\n", ctx.client_id);
+		return false;
+	}
+	ctx.ndi_thread = std::thread(ndi_sender_thread, &ctx);
+	return true;
+}
+
 
 bool init_decoder(ClientContext& ctx) {
 	Logger log("zcam_native.log");
@@ -402,22 +486,31 @@ void decode_video(ClientContext* ctx, VideoPacket* pkt)
 		return;
 
 	AVPacket* avpkt = av_packet_alloc();
+
 	av_new_packet(avpkt, pkt->len);
-	memcpy(avpkt->data, pkt->data, pkt->len);
+	memcpy(avpkt->data, pkt->data.get(), pkt->len);
 
-	if (avcodec_send_packet(ctx->codec_ctx, avpkt) < 0)
-	{
-		av_packet_free(&avpkt);
-		free(pkt->data);
+	int ret = avcodec_send_packet(ctx->codec_ctx, avpkt);
+
+	av_packet_free(&avpkt);
+
+	if (ret < 0)
 		return;
-	}
 
-	AVFrame* frame = av_frame_alloc();
-	AVFrame* hw_frame = nullptr;
+	if (!ctx->decode_frame)
+		ctx->decode_frame = av_frame_alloc();
+
+	if (ctx->clientConfig.decoderType == DecoderType::HW_CUDA &&
+		!ctx->hw_frame)
+	{
+		ctx->hw_frame = av_frame_alloc();
+	}
 
 	while (true)
 	{
-		int ret = avcodec_receive_frame(ctx->codec_ctx, frame);
+		av_frame_unref(ctx->decode_frame);
+
+		ret = avcodec_receive_frame(ctx->codec_ctx, ctx->decode_frame);
 
 		if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
 			break;
@@ -425,20 +518,22 @@ void decode_video(ClientContext* ctx, VideoPacket* pkt)
 		if (ret < 0)
 			break;
 
-		AVFrame* use_frame = frame;
+		AVFrame* use_frame = ctx->decode_frame;
 
 		if (ctx->clientConfig.decoderType == DecoderType::HW_CUDA)
 		{
-			if (!hw_frame)
-				hw_frame = av_frame_alloc();
+			av_frame_unref(ctx->hw_frame);
 
-			if (av_hwframe_transfer_data(hw_frame, frame, 0) < 0)
+			if (av_hwframe_transfer_data(
+				ctx->hw_frame,
+				ctx->decode_frame,
+				0) < 0)
 			{
-				log.error("Failed to transfer HW frame\n");
+				log.error("Failed to transfer HW frame");
 				break;
 			}
 
-			use_frame = hw_frame;
+			use_frame = ctx->hw_frame;
 		}
 
 		if (!ctx->rgb_frame ||
@@ -459,48 +554,57 @@ void decode_video(ClientContext* ctx, VideoPacket* pkt)
 			av_frame_get_buffer(ctx->rgb_frame, 32);
 
 			ctx->sws_ctx = sws_getContext(
-				use_frame->width, use_frame->height,
+				use_frame->width,
+				use_frame->height,
 				(AVPixelFormat)use_frame->format,
-				ctx->rgb_frame->width, ctx->rgb_frame->height,
+				ctx->rgb_frame->width,
+				ctx->rgb_frame->height,
 				AV_PIX_FMT_BGRA,
-				SWS_BILINEAR, nullptr, nullptr, nullptr);
+				SWS_FAST_BILINEAR,
+				nullptr,
+				nullptr,
+				nullptr);
+
+			if (!ctx->sws_ctx)
+				return;
 
 			ctx->last_width = use_frame->width;
 			ctx->last_height = use_frame->height;
 		}
 
-		sws_scale(ctx->sws_ctx,
-			use_frame->data, use_frame->linesize,
-			0, use_frame->height,
-			ctx->rgb_frame->data, ctx->rgb_frame->linesize);
+		sws_scale(
+			ctx->sws_ctx,
+			use_frame->data,
+			use_frame->linesize,
+			0,
+			use_frame->height,
+			ctx->rgb_frame->data,
+			ctx->rgb_frame->linesize
+		);
 
-		NDIlib_video_frame_v2_t ndi_frame;
-		ndi_frame.xres = ctx->rgb_frame->width;
-		ndi_frame.yres = ctx->rgb_frame->height;
-		ndi_frame.FourCC = NDIlib_FourCC_type_BGRA;
-		ndi_frame.frame_rate_N = 240000;
-		ndi_frame.frame_rate_D = 1001;
-		ndi_frame.picture_aspect_ratio =
-			(float)ctx->rgb_frame->width / ctx->rgb_frame->height;
-		ndi_frame.timecode = NDIlib_send_timecode_synthesize;
-		ndi_frame.p_data = ctx->rgb_frame->data[0];
-		ndi_frame.line_stride_in_bytes =
-			ctx->rgb_frame->linesize[0];
+		NDIFrame frame;
 
-		NDIlib_send_send_video_v2(ctx->ndi_sender, &ndi_frame);
+		frame.width = ctx->rgb_frame->width;
+		frame.height = ctx->rgb_frame->height;
+		frame.stride = ctx->rgb_frame->linesize[0];
 
-		av_frame_unref(frame);
-		if (hw_frame)
-			av_frame_unref(hw_frame);
+		size_t size = frame.stride * frame.height;
+
+		frame.data.resize(size);
+
+		memcpy(frame.data.data(), ctx->rgb_frame->data[0], size);
+
+		{
+			std::lock_guard<std::mutex> lock(ctx->ndi_mutex);
+
+			if (ctx->ndi_queue.size() > MAX_NDI_QUEUE_SIZE)
+				ctx->ndi_queue.pop();  // drop old frame
+
+			ctx->ndi_queue.push(std::move(frame));
+		}
+
+		ctx->ndi_cv.notify_one();
 	}
-
-	av_frame_free(&frame);
-	av_packet_free(&avpkt);
-
-	if (hw_frame)
-		av_frame_free(&hw_frame);
-
-	//free(pkt->data);
 }
 
 static void on_audio_data_1(struct imf::SspAudioData* audio)
@@ -517,7 +621,7 @@ static void on_meta_1(struct imf::SspVideoMeta* vmeta, struct imf::SspAudioMeta*
 {
 	Logger log("zcam_native.log");
 
-	log.info("Video Meta received: {}x{}  {}/{}, Encoder: {}\n",
+	log.info("Video Meta received: {}x{}  {}/{}, Encoder: {}",
 		vmeta->width,
 		vmeta->height,
 		vmeta->unit,
@@ -535,6 +639,7 @@ static void on_meta_2(struct imf::SspVideoMeta* v, struct imf::SspAudioMeta* a, 
 static void on_disconnect()
 {
 	Logger log("zcam_native.log");
+	cleanup_clients();
 	log.info("on disconnect\n");
 }
 
@@ -559,19 +664,15 @@ static void setup(imf::Loop* loop)
 
 		// Initialize decoder
 		if (!init_decoder(*ctx)) {
-			log.error("Decoder init failed for client %d\n", i);
-			continue;
-		}	
-
-		// Initialize NDI sender
-		NDIlib_send_create_t NDI_send_create_desc;
-		NDI_send_create_desc.p_ndi_name = ctx->name.c_str();
-		ctx->ndi_sender = NDIlib_send_create(&NDI_send_create_desc);
-		if (!ctx->ndi_sender) {
-			log.error("Failed to create NDI sender for client %d\n", i);
+			log.error("Decoder init failed for client {}", i);
 			continue;
 		}
 
+		if (!init_ndi(*ctx)) {
+			log.error("NDI init failed for client {}", i);
+			continue;
+		}
+		
 		// Save context pointer for lambda
 		ClientContext* ctx_ptr = ctx.get();
 	
@@ -585,18 +686,22 @@ static void setup(imf::Loop* loop)
 		client->setOnH264DataCallback(
 			[ctx_ptr](imf::SspH264Data* h264)
 			{
-				uint8_t* copy = (uint8_t*)malloc(h264->len);
-				memcpy(copy, h264->data, h264->len);
+				auto buffer = std::make_unique<uint8_t[]>(h264->len);
+				memcpy(buffer.get(), h264->data, h264->len);
 
-				VideoPacket pkt{ copy, h264->len, h264->frm_no };
+				VideoPacket pkt{
+					std::move(buffer),
+					h264->len,
+					h264->frm_no
+				};
 
 				ctx_ptr->videoQueue.enqueue(
-					pkt,
+					std::move(pkt),
 					h264->pts,
 					h264->type == 5
 				);
-			}
-		);
+			});
+
 		ctx->videoQueue.setFrameCallback(
 			[ctx_ptr](VideoPacket* pkt)
 			{
@@ -627,168 +732,85 @@ static void setup(imf::Loop* loop)
 
 		log.info("Queue thread started for client {} ", ctx->client_id);
 
-		client->start();
 		ctx->videoQueue.start();
+		client->start();
 
 		// Save for lifetime management
 		g_client_contexts.push_back(std::move(ctx));
 		g_ssp_clients.push_back(std::move(client));
 
-		log.info("Started client {}: {} [{}] {} {} {}", i, input.ip.c_str(),
+		log.info("Started client {}: {} [{}]", i, input.ip.c_str(),
 			input.decoderType == DecoderType::HW_CUDA ? "HW_CUDA" : "SW");
-
-		std::this_thread::sleep_for(std::chrono::seconds(5));
 	}
 }
 
-void cleanup_clients() {
-	for (auto& ctx : g_client_contexts) {
-		if (ctx->ndi_sender)
-			NDIlib_send_destroy(ctx->ndi_sender);
-		if (ctx->codec_ctx)
-			avcodec_free_context(&ctx->codec_ctx);
-		if (ctx->hw_device_ctx)
-			av_buffer_unref(&ctx->hw_device_ctx);
-		if (ctx->sws_ctx)
-			sws_freeContext(ctx->sws_ctx);
-		if (ctx->rgb_frame)
-			av_frame_free(&ctx->rgb_frame);
-	}
-	g_client_contexts.clear();
-	g_ssp_clients.clear();
-}
 
 void handle_sigint(int) {
 	running = false;
 }
 
-std::string enumToString(DecoderType type) {
-	switch (type) {
-	case DecoderType::SOFTWARE:
-		return "SOFTWARE";
-	case DecoderType::HW_CUDA:
-		return "HW_CUDA";
-	default:
-		return "UNKNOWN";
-	}
-}
 
-std::string codecToString(CodecType type) {
-	switch (type) {
-	case CodecType::H264:
-		return "h264";
-	case CodecType::HEVC:
-		return "h265";
-	default:
-		return "UNKNOWN";
-	}
-}
+LONG WINAPI WriteCrashDump(EXCEPTION_POINTERS* pException) {
+	char fileName[MAX_PATH];
+	sprintf_s(fileName, "ZCamNativeCrash_%lu.dmp", GetCurrentProcessId());
 
+	HANDLE hFile = CreateFileA(fileName, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 
-int SetParams() {
-	std::vector<std::string> found;
-	Logger log("zcam_native.log");
-	bool ret = false;
-	std::string video_encoder;
+	if (hFile != INVALID_HANDLE_VALUE) {
+		MINIDUMP_EXCEPTION_INFORMATION mei;
+		mei.ThreadId = GetCurrentThreadId();
+		mei.ExceptionPointers = pException;
+		mei.ClientPointers = FALSE;
 
-	for (const auto& clientInput : gClientInputs)
-	{
-		ZCamStreamBuilder builder(clientInput.ip);
-		ret = builder.set_vfr(clientInput.vfr);
-		if (ret) {
-			log.info("[SetParams] VFR Success for {} ", clientInput.ip);
-		}else {
-			log.info("[SetParams] VFR Failure for {} ", clientInput.ip);
-		}
+		// MiniDumpWithIndirectlyReferencedMemory is the production "sweet spot"
+		// It captures enough to see the crash without creating a multi-GB file.
+		MiniDumpWriteDump(
+			GetCurrentProcess(),
+			GetCurrentProcessId(),
+			hFile,
+			MiniDumpNormal,
+			&mei, NULL, NULL
+		);
 
-		std::this_thread::sleep_for(std::chrono::milliseconds(500));
-		
-		ret = builder.set_resolution(std::to_string(clientInput.width) + "x" + std::to_string(clientInput.height));
-		if (ret) {
-			log.info("[SetParams] Stream Resolution Success for {} ", clientInput.ip);
-		}else {
-			log.info("[SetParams] Stream Resolution Failure for {} ", clientInput.ip);
-		}
-		std::this_thread::sleep_for(std::chrono::milliseconds(500));
-
-		if (clientInput.codecType == CodecType::HEVC) {
-			video_encoder = "H.265";
-		}else {
-			video_encoder = "H.264";
-		}
-		ret = builder.set_video_encoder(video_encoder);
-		if (ret) {
-			log.info("[SetParams] VideoEncoder Success for {} ", clientInput.ip);
-		}
-		else {
-			log.info("[SetParams] VideoEncoder Failure for {} ", clientInput.ip);
-		}
-
-		std::this_thread::sleep_for(std::chrono::milliseconds(500));
-
-		ret = builder.set_stream("Stream0");
-		if (ret) {
-			log.info("[SetParams] set_stream 0 Success for {} ", clientInput.ip);
-		}
-		else {
-			log.info("[SetParams] set_stream 0 Failure for {} ", clientInput.ip);
-		}
-		std::this_thread::sleep_for(std::chrono::milliseconds(500));
-
-		ret = builder.set_stream("Stream1");
-		if (ret) {
-			log.info("[SetParams] set_stream 1 Success for {} ", clientInput.ip);
-		}
-		else {
-			log.info("[SetParams] set_stream 1 Failure for {} ", clientInput.ip);
-		}
-
-		std::this_thread::sleep_for(std::chrono::milliseconds(500));
-		ret = builder
-			.index(clientInput.stream)
-			.fps(clientInput.fps)
-			.bitrate(clientInput.bitrate)
-			.apply();
-
-		if (ret) {
-			log.info("Stream settings applied successfully for: {} ", clientInput.ip);
-		}else {
-			log.error("Failed to apply stream settings for: {} ", clientInput.ip);
-		}
+		CloseHandle(hFile);
 	}
 
-	return 0;
+	// Tell Windows to proceed with the crash (and let the Parent know)
+	return EXCEPTION_EXECUTE_HANDLER;
 }
+
 
 int main(int argc, char** argv)
 {
-	if(argc < 2)
-	{
-		std::cout << "Usage: " << argv[0] << " <path_to_streams.json>" << std::endl;
-		exit(1);
-	}
-
-	signal(SIGINT, handle_sigint);
-
 	Logger log("zcam_native.log");
 
-	StreamParser::ParseJson(argv[1], gClientInputs);
-	if(gClientInputs.size() == 0)
+	if (argc < 3)
 	{
-		log.error("No valid client inputs found in JSON. Exiting.");
+		log.error("Usage: zcam_worker <ip> <ndi_name>\n");
 		return 1;
 	}
 
-	SetParams();
+	// Register the filter at the very start of main()
+	SetUnhandledExceptionFilter(WriteCrashDump);
 
-	std::unique_ptr<imf::ThreadLoop> threadLooper(new imf::ThreadLoop(std::bind(setup, _1)));
+	std::string ip = argv[1];
+	std::string ndi_name = argv[2];
+
+	ClientInput input;
+	input.ip = ip;
+	input.ndi_name = ndi_name;
+
+	gClientInputs.push_back(input);
+
+	std::unique_ptr<imf::ThreadLoop> threadLooper(
+		new imf::ThreadLoop(std::bind(setup, _1)));
+
 	threadLooper->start();
 
-	while (1) {
+	while (true)
+	{
 		std::this_thread::sleep_for(std::chrono::seconds(1));
 	}
 
-	cleanup_clients();
-	threadLooper->stop();
 	return 0;
 }

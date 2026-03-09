@@ -15,27 +15,24 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="Logger.cpp">
+    <ClCompile Include="main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="ssptest.cpp">
+    <ClCompile Include="Logger.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="ClientProcessor.h">
+    <ClInclude Include="ClientInput.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="StreamParser.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Logger.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="ClientInput.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="VFrameQueue.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="ZCamWorker\StreamParser.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

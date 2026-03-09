@@ -32,3 +32,4 @@
 /ZCamStreamUI/ZCamStreamUI/Properties/PublishProfiles
 /ZCamStreamUI/ZCamInstaller/bin/Debug/net472
 /.vs
+/ZCamNative/ZCamWorker/x64

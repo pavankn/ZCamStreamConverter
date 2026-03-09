@@ -15,7 +15,7 @@ public:
         bool noDrop;
     };
 
-    VFrameQueue() : running(false) {}
+    VFrameQueue() : running(false), maxTime(0) {}
 
     void start()
     {
@@ -37,21 +37,21 @@ public:
         callback = std::move(cb);
     }
 
-    void enqueue(T&& data, uint64_t time_us, bool noDrop)
+    void setFrameTime(uint64_t time_us)
+    {
+        maxTime = time_us;
+    }
+
+    void enqueue(T data, uint64_t time_us, bool noDrop)
     {
         {
             std::lock_guard<std::mutex> lock(queueLock);
-
-            while (frameQueue.size() > maxQueueSize)
-                frameQueue.pop();
-
-            frameQueue.emplace(Frame{
-                std::move(data),
-                time_us,
-                noDrop
-                });
+            if (frameQueue.size() > 120)
+            {
+                frameQueue.pop(); // drop oldest
+            }
+            frameQueue.push({ data, time_us, noDrop });
         }
-
         cv.notify_one();
     }
 
@@ -66,16 +66,17 @@ private:
         ).count();
     }
 
+
     void run()
     {
+        Frame current;
+
         uint64_t lastFrameTime = 0;
         uint64_t lastStartTime = 0;
         uint64_t processingTime = 0;
 
         while (running)
         {
-            Frame current;
-
             {
                 std::unique_lock<std::mutex> lock(queueLock);
 
@@ -86,29 +87,27 @@ private:
                 if (!running)
                     break;
 
-                current = std::move(frameQueue.front());
+                current = frameQueue.front();
                 frameQueue.pop();
             }
 
             if (current.time < lastFrameTime)
                 continue;
 
-            bool shouldProcess = false;
-
             if (current.noDrop)
             {
-                shouldProcess = true;
-            }
-            else
-            {
-                uint64_t delta =
-                    current.time - lastFrameTime;
+                lastStartTime = os_gettime_ns() / 1000;
 
-                if (delta + 15000 > processingTime)
-                    shouldProcess = true;
-            }
+                if (callback)
+                    callback(&current.data);
 
-            if (shouldProcess)
+                lastFrameTime = current.time;
+
+                processingTime =
+                    os_gettime_ns() / 1000 - lastStartTime;
+            }
+            else if (current.time - lastFrameTime + 15000 >
+                processingTime)
             {
                 lastStartTime = os_gettime_ns() / 1000;
 
@@ -130,9 +129,9 @@ private:
     std::condition_variable cv;
 
     std::thread worker;
-    std::atomic<bool> running{ false };
+    std::atomic<bool> running;
 
     CallbackFunc callback;
 
-    static constexpr size_t maxQueueSize = 120;
+    uint64_t maxTime;
 };
