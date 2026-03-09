@@ -212,14 +212,10 @@ private:
 };
 
 
-HANDLE spawn_worker(const ClientInput& input)
-{
-	// Build the command line string
-	std::string cmd = "D:\\Pavankn\\source\\repos\\ZCamStreamConverter\\ZCamStreamUI\\x64\\Release\\ZCamNative.exe "
-		+ input.ip + " " + input.ndi_name;
-
+HANDLE spawn_worker(const ClientInput& input, const std::string workerPath)
+{	
 	// CreateProcess needs a modifiable char buffer
-	std::vector<char> cmdLine(cmd.begin(), cmd.end());
+	std::vector<char> cmdLine(workerPath.begin(), workerPath.end());
 	cmdLine.push_back('\0');
 
 	STARTUPINFOA si = { sizeof(si) };
@@ -328,16 +324,18 @@ int SetParams() {
 
 int main(int argc, char** argv)
 {
-	if (argc < 2)
+	if (argc < 3)
 	{
 		std::cout << "Usage: " << argv[0]
-			<< " <path_to_streams.json>" << std::endl;
+			<< " <path to worker exe> <path_to_streams.json>" << std::endl;
 		return 1;
 	}
 
 	signal(SIGINT, handle_sigint);
 
 	Logger log("zcam_native.log");
+
+	std::string workerPath(argv[1]);
 
 	StreamParser::ParseJson(argv[1], gClientInputs);
 
@@ -356,7 +354,7 @@ int main(int argc, char** argv)
 	std::vector<ClientInput> activeInputs;
 
 	for (const auto& input : gClientInputs) {
-		HANDLE h = spawn_worker(input);
+		HANDLE h = spawn_worker(input, workerPath);
 		if (h) {
 			hProcesses.push_back(h);
 			activeInputs.push_back(input);

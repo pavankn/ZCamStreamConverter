@@ -38,6 +38,7 @@ imf::Loop* gLoop = nullptr;
 
 static std::vector<std::unique_ptr<ClientContext>> g_client_contexts;
 static std::vector<std::unique_ptr<imf::SspClient>> g_ssp_clients;
+static std::vector<ClientInput> gClientInputs;
 
 static size_t WriteCallback(void* contents, size_t size,
 	size_t nmemb, void* userp)
@@ -643,7 +644,6 @@ static void on_disconnect()
 	log.info("on disconnect\n");
 }
 
-static std::vector<ClientInput> gClientInputs;
 
 static void setup(imf::Loop* loop)
 {

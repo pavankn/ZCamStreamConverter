@@ -30,6 +30,7 @@ namespace com.khelai.ZCamStreamUI
         public event Action<string> OutputReceived;
 
         private readonly string _zcamNativePath;
+        private readonly string _zcamWorkerPath;
         private bool _disposed;
         private Process _runningProcess;
         private CancellationTokenSource _linkedCts;
@@ -38,7 +39,7 @@ namespace com.khelai.ZCamStreamUI
         public ZCamNativeProcess(string zCamNativePath)
         {
             _zcamNativePath = zCamNativePath
-                ?? @"C:\Program Files\KhelAI\ZCamStreamConverter\ZCamNative.exe";
+                ?? @"C:\Program Files\KhelAI\ZCamStreamConverter\ZCamNativeMain.exe";
 
             if (!File.Exists(_zcamNativePath))
             {
@@ -52,16 +53,14 @@ namespace com.khelai.ZCamStreamUI
             Logger.Info("═══════════════════════════════════════════════");
         }
 
-        private async Task<ZCamNativeResult> RunInternalAsync(string arguments, bool isAsync, CancellationToken ct)
+        private async Task<ZCamNativeResult> RunInternalAsync(string zcamWorkerPath, string jsonpath, bool isAsync, CancellationToken ct)
         {
             ct.ThrowIfCancellationRequested();
 
-            Logger.Debug("Preparing ZCamNative command: " + arguments);
 
             var psi = new ProcessStartInfo
             {
                 FileName = _zcamNativePath,
-                Arguments = arguments,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
@@ -69,6 +68,10 @@ namespace com.khelai.ZCamStreamUI
                 StandardOutputEncoding = Encoding.UTF8,
                 StandardErrorEncoding = Encoding.UTF8
             };
+
+            // No need to worry about spaces or quotes here!
+            psi.ArgumentList.Add(zcamWorkerPath);
+            psi.ArgumentList.Add(jsonpath);
 
             var outputBuilder = new StringBuilder(4096);
 
@@ -102,7 +105,7 @@ namespace com.khelai.ZCamStreamUI
                     }
                 };
 
-                Logger.Debug("Starting: ZCamNative " + arguments);
+                Logger.Debug("Starting: ZCamNative with args: " + zcamWorkerPath + " " + jsonpath);
                 process.Start();
 
                 process.BeginOutputReadLine();
@@ -129,7 +132,7 @@ namespace com.khelai.ZCamStreamUI
             }
             catch (OperationCanceledException)
             {
-                Logger.Warning("Command cancelled: ZCamNative " + arguments);
+                Logger.Warning("Command cancelled: ZCamNative: " + zcamWorkerPath + " " + jsonpath);
                 throw;
             }
             catch (Exception ex)
@@ -149,7 +152,7 @@ namespace com.khelai.ZCamStreamUI
                     };
                 }
 
-                Logger.Error("Failed to run ZCamNative " + arguments + "\n" + ex);
+                Logger.Error("Failed to run ZCamNative: " + zcamWorkerPath + " " + jsonpath);
                 return new ZCamNativeResult
                 {
                     ExitCode = -1,
@@ -285,9 +288,9 @@ namespace com.khelai.ZCamStreamUI
             }
         }
 
-        public Task<ZCamNativeResult> RunAsync(string arguments, CancellationToken ct = default(CancellationToken))
+        public Task<ZCamNativeResult> RunAsync(string zacmworker, string jsonpath, CancellationToken ct = default(CancellationToken))
         {
-            return RunInternalAsync(arguments, true, ct);
+            return RunInternalAsync(zacmworker, jsonpath, true, ct);
         }
 
         public void Stop()

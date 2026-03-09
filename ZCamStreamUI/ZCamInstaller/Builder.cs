@@ -113,7 +113,8 @@ namespace ZCamInstaller
 
             // --- Add files ---
             appDir.AddFile(new WixSharp.File(Path.Combine(mainUIPath, "ZCamStreamUI.exe")));
-            appDir.AddFile(new WixSharp.File(Path.Combine(mainUIPath, "ZCamNative.exe")));
+            appDir.AddFile(new WixSharp.File(Path.Combine(mainUIPath, "ZCamNativeMain.exe")));
+            appDir.AddFile(new WixSharp.File(Path.Combine(mainUIPath, "ZCamWorker.exe")));
 
             // Add all DLL files
             appDir.AddFile(new WixSharp.File(Path.Combine(mainUIPath, "libssp.dll")));

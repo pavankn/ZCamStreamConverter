@@ -20,8 +20,11 @@ namespace com.khelai.ZCamStreamUI
         private bool _isLoadingSettings;
         private bool _isAsyncClosing = false;
 
+        private String? _zcamWorkerPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ZCamWorker.exe");
+
         private ZCamNativeProcess? _zcamProcess = new ZCamNativeProcess(
-            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ZCamNative.exe"));
+            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ZCamNativeMain.exe"));
+
 
         // Stores video settings per camera IP
         private readonly Dictionary<string, VideoSettings> _videoSettings
@@ -389,7 +392,7 @@ namespace com.khelai.ZCamStreamUI
 
             try
             {
-                await _zcamProcess.RunAsync($"\"{jsonPath}\"", CancellationToken.None);
+                await _zcamProcess.RunAsync(_zcamWorkerPath, $"\"{jsonPath}\"", CancellationToken.None);
             }
             catch (OperationCanceledException)
             {

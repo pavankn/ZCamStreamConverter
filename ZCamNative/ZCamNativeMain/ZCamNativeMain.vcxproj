@@ -24,6 +24,7 @@
     <ProjectGuid>{78fd91b6-96a7-474a-bb43-b4ae9089273c}</ProjectGuid>
     <RootNamespace>ZCamWorker</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <ProjectName>ZCamNativeMain</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
@@ -112,6 +113,10 @@
       <AdditionalLibraryDirectories>..\external\lib\libssp;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>libsspd.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <PostBuildEvent>
+      <Command>copy $(SolutionDir)$(Platform)\$(Configuration)\$(ProjectName).exe $(SolutionDir)$(SolutionName)\bin\$(Configuration)\net8.0-windows
+</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -133,6 +138,10 @@
     <ProjectReference>
       <LinkLibraryDependencies>false</LinkLibraryDependencies>
     </ProjectReference>
+    <PostBuildEvent>
+      <Command>copy $(SolutionDir)$(Platform)\$(Configuration)\$(ProjectName).exe $(SolutionDir)$(SolutionName)\bin\$(Configuration)\net8.0-windows
+</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="Logger.cpp" />
