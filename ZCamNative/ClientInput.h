@@ -16,6 +16,8 @@ extern "C" {
 #include <condition_variable>
 #include "VFrameQueue.h"
 
+#define MAX_NDI_QUEUE_SIZE (5)
+
 enum class DecoderType {
 	SOFTWARE,
 	HW_CUDA
@@ -41,10 +43,19 @@ typedef struct ClientInput {
 
 typedef struct VideoPacket
 {
-	uint8_t* data;
+	std::unique_ptr<uint8_t[]> data;
 	size_t len;
 	uint32_t frameno;
 }VideoPacket;
+
+typedef struct NDIFrame
+{
+	int width;
+	int height;
+	int stride;
+
+	std::vector<uint8_t> data;
+}NDIFrame;
 
 struct ClientContext {
 
@@ -58,6 +69,8 @@ struct ClientContext {
 	AVCodecContext* codec_ctx = nullptr;
 	AVBufferRef* hw_device_ctx = nullptr;
 	VFrameQueue<VideoPacket> videoQueue;
+	AVFrame* decode_frame = nullptr;
+	AVFrame* hw_frame = nullptr;
 
 	// Audio 
 	AVCodecContext* audio_codec_ctx = nullptr;
@@ -82,6 +95,13 @@ struct ClientContext {
 
 	std::thread video_decode_thread;
 	std::atomic<bool> running{ true };
+
+	//NDI
+	std::queue<NDIFrame> ndi_queue;
+	std::mutex ndi_mutex;
+	std::condition_variable ndi_cv;
+	std::thread ndi_thread;
+	std::atomic<bool> ndi_running{ true };
 };
 
 
