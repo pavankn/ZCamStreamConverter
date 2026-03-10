@@ -35,74 +35,8 @@ std::atomic<bool> running(true);
 std::mutex out_mutex;
 imf::Loop* gLoop = nullptr;
 
+std::atomic<bool> g_running{ true };
 
-
-enum AVHWDeviceType hw_priority[] = {
-	AV_HWDEVICE_TYPE_QSV,          AV_HWDEVICE_TYPE_CUDA,
-	AV_HWDEVICE_TYPE_DXVA2,        AV_HWDEVICE_TYPE_D3D11VA,
-	AV_HWDEVICE_TYPE_VIDEOTOOLBOX, AV_HWDEVICE_TYPE_NONE };
-
-
-bool parse_hevc_packet(
-	const uint8_t* data,
-	size_t size,
-	std::vector<std::vector<uint8_t>>& out_nals)
-{
-	if (size < 2)
-		return false;
-
-	uint8_t nal_type = (data[0] & 0x7E) >> 1;
-
-	// Normal NAL
-	if (nal_type < 48)
-	{
-		out_nals.emplace_back(data, data + size);
-		return true;
-	}
-
-	// Aggregation packet
-	if (nal_type == 48)
-	{
-		size_t pos = 2;
-
-		while (pos + 2 < size)
-		{
-			uint16_t nal_size =
-				(data[pos] << 8) | data[pos + 1];
-
-			pos += 2;
-
-			if (pos + nal_size > size)
-				break;
-
-			out_nals.emplace_back(
-				data + pos,
-				data + pos + nal_size);
-
-			pos += nal_size;
-		}
-
-		return true;
-	}
-
-	return false;
-}
-
-static bool has_hw_type(const AVCodec* c, enum AVHWDeviceType type)
-{
-	for (int i = 0;; i++) {
-		const AVCodecHWConfig* config = avcodec_get_hw_config(c, i);
-		if (!config) {
-			break;
-		}
-
-		if (config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX &&
-			config->device_type == type) {
-			return true;
-		}
-	}
-	return false;
-}
 
 static std::vector<std::unique_ptr<ClientContext>> g_client_contexts;
 static std::vector<std::unique_ptr<imf::SspClient>> g_ssp_clients;
@@ -730,6 +664,14 @@ LONG WINAPI WriteCrashDump(EXCEPTION_POINTERS* pException) {
 }
 
 
+// Signal handler for clean exit
+void signalHandler(int signum) {
+	Logger log("zcam_native.log");
+
+	log.info("SignalHandler Invoked, signum {}", signum);
+	g_running = false;
+}
+
 int main(int argc, char** argv)
 {
 	Logger log("zcam_native.log");
@@ -742,6 +684,10 @@ int main(int argc, char** argv)
 
 	// Register the filter at the very start of main()
 	SetUnhandledExceptionFilter(WriteCrashDump);
+
+	// Register signal handlers for SIGINT (Ctrl+C) and SIGTERM
+	signal(SIGINT, signalHandler);
+	signal(SIGTERM, signalHandler);
 
 	std::string ip = argv[1];
 	std::string ndi_name = argv[2];
@@ -759,10 +705,15 @@ int main(int argc, char** argv)
 
 	threadLooper->start();
 
-	while (true)
+	// This will loop as long as the C# app is alive
+// If the C# app closes the pipe or crashes, cin.peek() will fail or EOF
+	while (std::cin.good() && g_running)
 	{
-		std::this_thread::sleep_for(std::chrono::seconds(1));
+		if (std::cin.eof()) break; // Exit if pipe closed
+		std::this_thread::sleep_for(std::chrono::milliseconds(200));
 	}
+
+	log.info("Pipe closed or Stop signaled. Exiting...");
 
 	return 0;
 }

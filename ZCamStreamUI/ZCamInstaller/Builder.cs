@@ -113,12 +113,10 @@ namespace ZCamInstaller
 
             // --- Add files ---
             appDir.AddFile(new WixSharp.File(Path.Combine(mainUIPath, "ZCamStreamUI.exe")));
-            appDir.AddFile(new WixSharp.File(Path.Combine(mainUIPath, "ZCamNativeMain.exe")));
             appDir.AddFile(new WixSharp.File(Path.Combine(mainUIPath, "ZCamWorker.exe")));
 
             // Add all DLL files
             appDir.AddFile(new WixSharp.File(Path.Combine(mainUIPath, "libssp.dll")));
-            appDir.AddFile(new WixSharp.File(Path.Combine(mainUIPath, "libcurl.dll")));
             appDir.AddFile(new WixSharp.File(Path.Combine(mainUIPath, "fmt.dll")));
             appDir.AddFile(new WixSharp.File(Path.Combine(mainUIPath, "Common.Logging.Core.dll")));
             appDir.AddFile(new WixSharp.File(Path.Combine(mainUIPath, "Common.Logging.dll")));
@@ -128,7 +126,6 @@ namespace ZCamInstaller
             appDir.AddFile(new WixSharp.File(Path.Combine(mainUIPath, "avfilter-11.dll")));
             appDir.AddFile(new WixSharp.File(Path.Combine(mainUIPath, "swresample-6.dll")));
             appDir.AddFile(new WixSharp.File(Path.Combine(mainUIPath, "swscale-9.dll")));
-            appDir.AddFile(new WixSharp.File(Path.Combine(mainUIPath, "zlib1.dll")));
             appDir.AddFile(new WixSharp.File(Path.Combine(mainUIPath, "Processing.NDI.Lib.Advanced.x64.dll")));
             appDir.AddFile(new WixSharp.File(Path.Combine(mainUIPath, "Processing.NDI.Lib.x64.dll")));
             appDir.AddFile(new WixSharp.File(Path.Combine(mainUIPath, "Makaretu.Dns.dll")));
@@ -137,7 +134,6 @@ namespace ZCamInstaller
             appDir.AddFile(new WixSharp.File(Path.Combine(mainUIPath, "ZCamStreamUI.dll")));
             appDir.AddFile(new WixSharp.File(Path.Combine(mainUIPath, "SimpleBase.dll")));
             appDir.AddFile(new WixSharp.File(Path.Combine(mainUIPath, "ZCamStreamUI.runtimeconfig.json")));
-            //appDir.AddFile(new WixSharp.File(Path.Combine(mainUIPath, "*.dll")));
 
 
             var project = new ManagedProject(product, root, UninistallShortcut(), StartMenuShorrcut(), DesktopShortuct());

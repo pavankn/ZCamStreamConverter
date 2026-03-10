@@ -5,7 +5,7 @@ VisualStudioVersion = 17.14.37012.4
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ZCamStreamUI", "ZCamStreamUI\ZCamStreamUI.csproj", "{97011190-E3D4-4D0C-8FDE-C876E30C48F8}"
 	ProjectSection(ProjectDependencies) = postProject
-		{78FD91B6-96A7-474A-BB43-B4AE9089273C} = {78FD91B6-96A7-474A-BB43-B4AE9089273C}
+		{AFF05A36-DA5A-49C3-AA94-325AA1C36B53} = {AFF05A36-DA5A-49C3-AA94-325AA1C36B53}
 	EndProjectSection
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ZCamInstaller", "ZCamInstaller\ZCamInstaller.csproj", "{9FC6A694-636F-4ED0-A01A-7445B89FED65}"
@@ -14,11 +14,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ZCamInstaller", "ZCamInstal
 	EndProjectSection
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ZCamWorker", "..\ZCamNative\ZCamWorker.vcxproj", "{AFF05A36-DA5A-49C3-AA94-325AA1C36B53}"
-EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ZCamNativeMain", "..\ZCamNative\ZCamNativeMain\ZCamNativeMain.vcxproj", "{78FD91B6-96A7-474A-BB43-B4AE9089273C}"
-	ProjectSection(ProjectDependencies) = postProject
-		{AFF05A36-DA5A-49C3-AA94-325AA1C36B53} = {AFF05A36-DA5A-49C3-AA94-325AA1C36B53}
-	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -66,18 +61,6 @@ Global
 		{AFF05A36-DA5A-49C3-AA94-325AA1C36B53}.Release|x64.Build.0 = Release|x64
 		{AFF05A36-DA5A-49C3-AA94-325AA1C36B53}.Release|x86.ActiveCfg = Release|Win32
 		{AFF05A36-DA5A-49C3-AA94-325AA1C36B53}.Release|x86.Build.0 = Release|Win32
-		{78FD91B6-96A7-474A-BB43-B4AE9089273C}.Debug|Any CPU.ActiveCfg = Debug|x64
-		{78FD91B6-96A7-474A-BB43-B4AE9089273C}.Debug|Any CPU.Build.0 = Debug|x64
-		{78FD91B6-96A7-474A-BB43-B4AE9089273C}.Debug|x64.ActiveCfg = Debug|x64
-		{78FD91B6-96A7-474A-BB43-B4AE9089273C}.Debug|x64.Build.0 = Debug|x64
-		{78FD91B6-96A7-474A-BB43-B4AE9089273C}.Debug|x86.ActiveCfg = Debug|Win32
-		{78FD91B6-96A7-474A-BB43-B4AE9089273C}.Debug|x86.Build.0 = Debug|Win32
-		{78FD91B6-96A7-474A-BB43-B4AE9089273C}.Release|Any CPU.ActiveCfg = Release|x64
-		{78FD91B6-96A7-474A-BB43-B4AE9089273C}.Release|Any CPU.Build.0 = Release|x64
-		{78FD91B6-96A7-474A-BB43-B4AE9089273C}.Release|x64.ActiveCfg = Release|x64
-		{78FD91B6-96A7-474A-BB43-B4AE9089273C}.Release|x64.Build.0 = Release|x64
-		{78FD91B6-96A7-474A-BB43-B4AE9089273C}.Release|x86.ActiveCfg = Release|Win32
-		{78FD91B6-96A7-474A-BB43-B4AE9089273C}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

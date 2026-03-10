@@ -1,7 +1,10 @@
 using System;
-using System.Threading.Tasks;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Security.Authentication.ExtendedProtection;
+using System.Text.Json;
+using System.Threading.Tasks;
+using ZCamStreamUI;
 
 namespace com.khelai.ZCamStreamUI
 {
@@ -23,7 +26,10 @@ namespace com.khelai.ZCamStreamUI
         private String _zcamWorkerPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ZCamWorker.exe");
 
         private ZCamNativeProcess _zcamProcess = new ZCamNativeProcess(
-            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ZCamNativeMain.exe"));
+            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ZCamWorker.exe"));
+
+        private readonly List<ZCamNativeProcess> _activeProcesses = new List<ZCamNativeProcess>();
+        private readonly object _listLock = new object();
 
 
         // Stores video settings per camera IP
@@ -346,6 +352,26 @@ namespace com.khelai.ZCamStreamUI
             return cfg;
         }
 
+
+        public async Task ProcessConfigAndApply(string jsonContent)
+        {
+            // 1. Parse JSON into C# Objects
+            var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            var config = JsonSerializer.Deserialize<ZCamConfig>(jsonContent, options);
+            if (config?.Streams == null) return;
+
+            // 2. Iterate and Apply to each camera
+            foreach (var cam in config.Streams)
+            {
+                ZCamController _zcamController = new ZCamController(cam.Ip);
+
+                bool success = await _zcamController.ApplySettingsAsync(cam);
+
+                Logger.Info($"Camera {cam.Ip} Setup: {(success ? "SUCCESS" : "FAILED")}");
+            }
+        }
+
+
         private string WriteStreamsJson()
         {
             var config = BuildStreamConfig();
@@ -387,6 +413,7 @@ namespace com.khelai.ZCamStreamUI
 
             if (!File.Exists(_zcamWorkerPath))
             {
+                MessageBox.Show($"Worker not found: {_zcamWorkerPath}");
                 throw new FileNotFoundException("ZCamWorker.exe not found", _zcamWorkerPath);
             }
                      
@@ -401,40 +428,69 @@ namespace com.khelai.ZCamStreamUI
             if (!File.Exists(jsonPath))
                 return;
 
+            string jsonContent = File.ReadAllText(jsonPath);
+
+            await ProcessConfigAndApply(jsonContent);
+
             try
             {
-                await _zcamProcess.RunAsync(_zcamWorkerPath, jsonPath, CancellationToken.None);
-            }
-            catch (OperationCanceledException)
-            {
-                // Do nothing or log it. 
-                // This is a "clean" exit triggered by your Stop button.
-                Logger.Info("ZCamNative Stopped by the User");
+                foreach (var ip in selectedIps)
+                {
+                    // Extract last 3 digits of IP (e.g., 192.168.1.188 -> 188)
+                    string lastThree = ip.Split('.').Last();
+                    string ndiName = $"Khel_NDI_{lastThree}";
+
+                    // 1. Create a NEW instance for this specific camera
+                    var workerPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ZCamWorker.exe");
+                    var processHandler = new ZCamNativeProcess(workerPath);
+
+                    // 2. Track it in our list
+                    lock (_listLock)
+                    {
+                        _activeProcesses.Add(processHandler);
+                    }
+
+                    // 3. Run it (assuming your RunAsync takes IP and NDI name)
+                    // We don't 'await' here so all cameras start simultaneously
+                    _ = _zcamProcess.RunAsync(ip, ndiName, CancellationToken.None);
+
+                    Logger.Info($"Started worker for {ip} with NDI: {ndiName}");                  
+                }
             }
             catch (Exception ex)
             {
-                // This is a REAL error (e.g., the .exe crashed or path is wrong)
-                MessageBox.Show("Failed to start ZCamNative.exe: " + ex.Message);
+                MessageBox.Show("Failed to start workers: " + ex.Message);
                 await KillZcamProcess();
-            }          
+            }
         }
 
         private async Task KillZcamProcess()
         {
-            try
+            List<ZCamNativeProcess> processesToStop;
+
+            lock (_listLock)
             {
-                _zcamProcess?.Stop();
-                await Task.Delay(1000);
+                processesToStop = _activeProcesses.ToList();
+                _activeProcesses.Clear(); // Clear the list so UI doesn't try to stop them twice
             }
-            catch (Exception ex)
+
+            foreach (var proc in processesToStop)
             {
-                MessageBox.Show("Failed to kill process: " + ex.Message);
-            }
-            finally
-            {
-                _zcamProcess?.Dispose();
-                _zcamProcess = null;
-            }
+                try
+                {
+                    // This calls your internal Stop() which likely signals the native exe
+                    proc.Stop();
+                    await Task.Delay(1000);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Error($"Error killing process: {ex.Message}");
+                }
+                finally
+                {
+                    proc.Dispose();
+                }
+            }           
         }
 
         private async void OnClick_Stop(object sender, EventArgs e)
