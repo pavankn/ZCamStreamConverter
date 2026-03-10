@@ -18,6 +18,7 @@
 #include "imf/net/loop.h"
 #include "imf/net/threadloop.h"
 #include "imf/ssp/sspclient.h"
+#include "NativeProcess.h"
 
 std::atomic<bool> running(true);
 
@@ -212,32 +213,6 @@ private:
 };
 
 
-HANDLE spawn_worker(const ClientInput& input, const std::string workerPath)
-{	
-	// CreateProcess needs a modifiable char buffer
-	std::vector<char> cmdLine(workerPath.begin(), workerPath.end());
-	cmdLine.push_back('\0');
-
-	STARTUPINFOA si = { sizeof(si) };
-	PROCESS_INFORMATION pi = { 0 };
-
-	BOOL ok = CreateProcessA(
-		NULL, cmdLine.data(), NULL, NULL, FALSE,
-		CREATE_NEW_CONSOLE, // Useful for debugging; change to 0 for background
-		NULL, NULL, &si, &pi
-	);
-
-	if (!ok) {
-		fprintf(stderr, "Failed to spawn worker for %s. Error: %lu\n",
-			input.ip.c_str(), GetLastError());
-		return NULL;
-	}
-
-	// We don't need the thread handle, but we MUST keep the process handle to monitor it
-	CloseHandle(pi.hThread);
-	return pi.hProcess;
-}
-
 void handle_sigint(int) {
 	running = false;
 }
@@ -321,6 +296,14 @@ int SetParams() {
 	return 0;
 }
 
+NativeProcess spawn_worker(const ClientInput& input, const std::string& workerPath)
+{
+	std::string cmd = "\"" + workerPath + "\" " +
+		input.ip + " " +
+		input.ndi_name;
+
+	return NativeProcess(cmd);
+}
 
 int main(int argc, char** argv)
 {
@@ -335,9 +318,9 @@ int main(int argc, char** argv)
 
 	Logger log("zcam_native.log");
 
-	std::string workerPath(argv[1]);
+	std::string workerPath = "C:\\Program Files\\KhelAI\\ZCamStreamConverter\\ZCamWorker.exe";
 
-	StreamParser::ParseJson(argv[1], gClientInputs);
+	StreamParser::ParseJson(argv[2], gClientInputs);
 
 	if (gClientInputs.empty())
 	{
@@ -349,63 +332,16 @@ int main(int argc, char** argv)
 
 	log.info("Spawning camera workers...");
 
-	// 1. Initial Spawn
-	std::vector<HANDLE> hProcesses;
-	std::vector<ClientInput> activeInputs;
+	std::vector<NativeProcess> workers;
+	std::vector<HANDLE> handles;
 
-	for (const auto& input : gClientInputs) {
-		HANDLE h = spawn_worker(input, workerPath);
-		if (h) {
-			hProcesses.push_back(h);
-			activeInputs.push_back(input);
-		}
-	}
+	workers.reserve(gClientInputs.size());
+	handles.reserve(gClientInputs.size());
 
-	log.info("Monitoring " + std::to_string(hProcesses.size()) + " workers...");
-
-	// 2. The Event-Driven Wait Loop
-	while (!hProcesses.empty()) {
-		// This blocks the thread with 0% CPU until a process exits
-		DWORD result = WaitForMultipleObjects(
-			(DWORD)hProcesses.size(),
-			hProcesses.data(),
-			FALSE,    // Wake up when ANY process dies
-			INFINITE  // No timeout
-		);
-
-		// Calculate which index signaled
-		DWORD index = result - WAIT_OBJECT_0;
-
-		if (index >= 0 && index < hProcesses.size()) {
-			HANDLE failedHandle = hProcesses[index];
-			ClientInput failedInput = activeInputs[index];
-
-			DWORD exitCode = 0;
-			GetExitCodeProcess(failedHandle, &exitCode);
-
-			log.error("Worker CRASHED/EXITED: " + failedInput.ip + " (Code: " + std::to_string(exitCode) + ")");
-
-			// Cleanup the old handle
-			CloseHandle(failedHandle);
-
-			// --- RESTART LOGIC ---
-			//log.info("Attempting to restart worker for " + failedInput.ip);
-			//HANDLE newHandle = spawn_worker(failedInput);
-
-			//if (newHandle) {
-			//	hProcesses[index] = newHandle; // Replace the old handle with the new one
-			//	// activeInputs[index] stays the same
-			//}
-			//else {
-			//	// If restart fails, remove from monitoring list
-			//	hProcesses.erase(hProcesses.begin() + index);
-			//	activeInputs.erase(activeInputs.begin() + index);
-			//}
-		}
-		else {
-			log.error("Wait failed or encountered an error.");
-			break;
-		}
+	for (const auto& input : gClientInputs)
+	{
+		workers.push_back(spawn_worker(input, workerPath));
+		handles.push_back(workers.back().get());
 	}
 
 	return 0;

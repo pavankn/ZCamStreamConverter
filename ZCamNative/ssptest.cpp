@@ -293,6 +293,7 @@ bool init_ndi(ClientContext& ctx) {
 		log.error("Failed to create NDI sender for client %d\n", ctx.client_id);
 		return false;
 	}
+	ctx.ndi_running = true;
 	ctx.ndi_thread = std::thread(ndi_sender_thread, &ctx);
 	return true;
 }
@@ -304,6 +305,9 @@ bool init_decoder(ClientContext& ctx) {
 	std::string decoderName;
 	DecoderType decoderType = ctx.clientConfig.decoderType;
 	CodecType codecType = ctx.clientConfig.codecType;
+
+	decoderType = DecoderType::HW_CUDA;
+	codecType = CodecType::HEVC;
 
 	// Video
 	if (decoderType == DecoderType::HW_CUDA) {
@@ -523,7 +527,7 @@ void decode_video(ClientContext* ctx, VideoPacket* pkt)
 
 		if (ctx->clientConfig.decoderType == DecoderType::HW_CUDA)
 		{
-			av_frame_unref(ctx->hw_frame);
+			//av_frame_unref(ctx->hw_frame);
 
 			if (av_hwframe_transfer_data(
 				ctx->hw_frame,
@@ -661,6 +665,7 @@ static void setup(imf::Loop* loop)
 		ctx->client_id = i;
 		ctx->name = input.ndi_name;
 		ctx->clientConfig.decoderType = input.decoderType;
+		ctx->clientConfig.codecType = input.codecType;
 
 		// Initialize decoder
 		if (!init_decoder(*ctx)) {
@@ -799,6 +804,8 @@ int main(int argc, char** argv)
 	ClientInput input;
 	input.ip = ip;
 	input.ndi_name = ndi_name;
+	input.decoderType = DecoderType::HW_CUDA;
+	input.codecType = CodecType::HEVC;
 
 	gClientInputs.push_back(input);
 

@@ -150,6 +150,7 @@
   <ItemGroup>
     <ClInclude Include="ClientInput.h" />
     <ClInclude Include="Logger.h" />
+    <ClInclude Include="NativeProcess.h" />
     <ClInclude Include="StreamParser.h" />
     <ClInclude Include="VFrameQueue.h" />
   </ItemGroup>
