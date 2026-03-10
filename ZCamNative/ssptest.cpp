@@ -703,6 +703,8 @@ int main(int argc, char** argv)
 	std::unique_ptr<imf::ThreadLoop> threadLooper(
 		new imf::ThreadLoop(std::bind(setup, _1)));
 
+	log.info("Pavankn Starting Main Loop");
+
 	threadLooper->start();
 
 	// This will loop as long as the C# app is alive

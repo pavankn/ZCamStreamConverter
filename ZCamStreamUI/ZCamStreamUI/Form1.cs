@@ -464,6 +464,35 @@ namespace com.khelai.ZCamStreamUI
             }
         }
 
+        public static void ForceKillAllZCamWorkers()
+        {
+            // Find all running processes with this name (no .exe extension needed)
+            var runningWorkers = System.Diagnostics.Process.GetProcessesByName("ZCamWorker");
+
+            foreach (var worker in runningWorkers)
+            {
+                try
+                {
+                    // Forceful termination (equivalent to Task Manager 'End Task')
+                    worker.Kill();
+
+                    // Wait up to 1 second for the OS to reclaim the memory
+                    worker.WaitForExit(1000);
+
+                    Logger.Info($"Successfully killed process ID: {worker.Id}");
+                }
+                catch (Exception ex)
+                {
+                    // This happens if the process is already closing or access is denied
+                    Logger.Info($"Could not kill process {worker.Id}: {ex.Message}");
+                }
+                finally
+                {
+                    worker.Dispose();
+                }
+            }
+        }
+
         private async Task KillZcamProcess()
         {
             List<ZCamNativeProcess> processesToStop;
@@ -535,6 +564,7 @@ namespace com.khelai.ZCamStreamUI
             {
                 _isAsyncClosing = true;
                 this.Close(); // Trigger the second pass of FormClosing
+                ForceKillAllZCamWorkers();
             }
         }
     }
