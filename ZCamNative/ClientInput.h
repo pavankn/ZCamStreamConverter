@@ -46,6 +46,7 @@ typedef struct VideoPacket
 	std::unique_ptr<uint8_t[]> data;
 	size_t len;
 	uint32_t frameno;
+	int type;
 }VideoPacket;
 
 typedef struct NDIFrame
@@ -71,6 +72,7 @@ struct ClientContext {
 	VFrameQueue<VideoPacket> videoQueue;
 	AVFrame* decode_frame = nullptr;
 	AVFrame* hw_frame = nullptr;
+	bool wait_i_frame = true;
 
 	// Audio 
 	AVCodecContext* audio_codec_ctx = nullptr;

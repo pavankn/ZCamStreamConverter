@@ -44,8 +44,10 @@ namespace com_khelai_zcamnative
 				throw std::invalid_argument("jsonPath is null");
 
 			std::ifstream file(jsonPath);
-			if (!file.is_open())
+			if (!file.is_open()) {
+				log.error("Cannot Open File: {} ", jsonPath);
 				throw std::runtime_error("Failed to open streams.json");
+			}
 
 			log.info("Opened JSON File Successfully");
 

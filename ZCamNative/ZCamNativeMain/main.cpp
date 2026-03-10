@@ -318,9 +318,12 @@ int main(int argc, char** argv)
 
 	Logger log("zcam_native.log");
 
-	std::string workerPath = "C:\\Program Files\\KhelAI\\ZCamStreamConverter\\ZCamWorker.exe";
+	log.info("Starting Native with args: {}, {} ",  argv[1],  argv[2]);
 
-	StreamParser::ParseJson(argv[2], gClientInputs);
+	const char* workerPath = argv[1];
+	const char* jsonPath = argv[2];
+
+	StreamParser::ParseJson(jsonPath, gClientInputs);
 
 	if (gClientInputs.empty())
 	{

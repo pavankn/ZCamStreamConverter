@@ -36,186 +36,78 @@ std::mutex out_mutex;
 imf::Loop* gLoop = nullptr;
 
 
+
+enum AVHWDeviceType hw_priority[] = {
+	AV_HWDEVICE_TYPE_QSV,          AV_HWDEVICE_TYPE_CUDA,
+	AV_HWDEVICE_TYPE_DXVA2,        AV_HWDEVICE_TYPE_D3D11VA,
+	AV_HWDEVICE_TYPE_VIDEOTOOLBOX, AV_HWDEVICE_TYPE_NONE };
+
+
+bool parse_hevc_packet(
+	const uint8_t* data,
+	size_t size,
+	std::vector<std::vector<uint8_t>>& out_nals)
+{
+	if (size < 2)
+		return false;
+
+	uint8_t nal_type = (data[0] & 0x7E) >> 1;
+
+	// Normal NAL
+	if (nal_type < 48)
+	{
+		out_nals.emplace_back(data, data + size);
+		return true;
+	}
+
+	// Aggregation packet
+	if (nal_type == 48)
+	{
+		size_t pos = 2;
+
+		while (pos + 2 < size)
+		{
+			uint16_t nal_size =
+				(data[pos] << 8) | data[pos + 1];
+
+			pos += 2;
+
+			if (pos + nal_size > size)
+				break;
+
+			out_nals.emplace_back(
+				data + pos,
+				data + pos + nal_size);
+
+			pos += nal_size;
+		}
+
+		return true;
+	}
+
+	return false;
+}
+
+static bool has_hw_type(const AVCodec* c, enum AVHWDeviceType type)
+{
+	for (int i = 0;; i++) {
+		const AVCodecHWConfig* config = avcodec_get_hw_config(c, i);
+		if (!config) {
+			break;
+		}
+
+		if (config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX &&
+			config->device_type == type) {
+			return true;
+		}
+	}
+	return false;
+}
+
 static std::vector<std::unique_ptr<ClientContext>> g_client_contexts;
 static std::vector<std::unique_ptr<imf::SspClient>> g_ssp_clients;
 static std::vector<ClientInput> gClientInputs;
 
-static size_t WriteCallback(void* contents, size_t size,
-	size_t nmemb, void* userp)
-{
-	((std::string*)userp)->append(
-		(char*)contents, size * nmemb);
-	return size * nmemb;
-}
-
-class ZCamStreamBuilder {
-public:
-	ZCamStreamBuilder(const std::string& ip)
-		: ip_(ip) {
-		params_["index"] = "stream1"; // default
-	}
-
-	ZCamStreamBuilder& index(const std::string& index) {
-		params_["index"] = index;
-		return *this;
-	}
-
-	ZCamStreamBuilder& resolution(int w, int h) {
-		params_["width"] = std::to_string(w);
-		params_["height"] = std::to_string(h);
-		return *this;
-	}
-
-	ZCamStreamBuilder& bitrate(uint32_t bps) {
-		params_["bitrate"] = std::to_string(bps);
-		return *this;
-	}
-
-	ZCamStreamBuilder& encoder(const std::string& enc) {
-		params_["venc"] = enc;
-		return *this;
-	}
-
-	ZCamStreamBuilder& fps(int value) {
-		params_["fps"] = std::to_string(value);
-		return *this;
-	}
-
-	bool apply()
-	{
-		Logger log("zcam_native.log");
-				
-		CURL* curl = curl_easy_init();
-		if (!curl) return false;
-
-		std::string response;
-
-		std::string url =
-			"http://" + ip_ + "/ctrl/stream_setting";
-
-		bool first = true;
-		for (const auto& pair : params_)
-		{
-			char* enc =
-				curl_easy_escape(curl,
-					pair.second.c_str(), 0);
-
-			url += (first ? "?" : "&") +
-				pair.first + "=" + enc;
-
-			curl_free(enc);
-			first = false;
-		}
-
-		curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
-		curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
-		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
-		curl_easy_setopt(curl, CURLOPT_USERAGENT, "Mozilla/5.0");
-
-		CURLcode res = curl_easy_perform(curl);
-		curl_easy_cleanup(curl);
-
-		if (res != CURLE_OK)
-			return false;
-
-		// SUCCESS
-		if (response.find("\"code\":0") != std::string::npos) {
-			return true;
-		}
-
-		return false;
-	}
-	bool set_vfr(int vfr)
-	{
-		CURL* curl = curl_easy_init();
-		if (!curl) return false;
-
-		std::string response;
-
-		std::string url =
-			"http://" + ip_ + "/ctrl/set?movvfr=" + std::to_string(vfr);
-
-		curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
-		curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
-		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
-
-		CURLcode res = curl_easy_perform(curl);
-		curl_easy_cleanup(curl);
-
-		return (res == CURLE_OK &&
-			response.find("\"code\":0") != std::string::npos);
-	}
-	bool set_resolution(std::string resolution)
-	{
-		CURL* curl = curl_easy_init();
-		if (!curl) return false;
-
-		std::string response;
-
-		std::string url =
-			"http://" + ip_ + "/ctrl/set?resolution=" + resolution;
-
-		curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
-		curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
-		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
-
-		CURLcode res = curl_easy_perform(curl);
-		curl_easy_cleanup(curl);
-
-		return (res == CURLE_OK &&
-			response.find("\"code\":0") != std::string::npos);
-	}
-	bool set_video_encoder(std::string videoencoder)
-	{
-		CURL* curl = curl_easy_init();
-		if (!curl) return false;
-
-		std::string response;
-
-		std::string url =
-			"http://" + ip_ + "/ctrl/set?video_encoder=" + videoencoder;
-
-		curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
-		curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
-		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
-
-		CURLcode res = curl_easy_perform(curl);
-		curl_easy_cleanup(curl);
-
-		return (res == CURLE_OK &&
-			response.find("\"code\":0") != std::string::npos);
-	}
-
-	bool set_stream(std::string streamindex)
-	{
-		CURL* curl = curl_easy_init();
-		if (!curl) return false;
-
-		std::string response;
-
-		std::string url =
-			"http://" + ip_ + "/ctrl/set?send_stream=" + streamindex;
-
-		curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteCallback);
-		curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
-		curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
-
-		CURLcode res = curl_easy_perform(curl);
-		curl_easy_cleanup(curl);
-
-		return (res == CURLE_OK &&
-			response.find("\"code\":0") != std::string::npos);
-	}
-
-private:
-	std::string ip_;
-	std::map<std::string, std::string> params_;
-};
 
 static void cleanup_clients() {
 	for (auto& ctx : g_client_contexts) {
@@ -299,91 +191,106 @@ bool init_ndi(ClientContext& ctx) {
 }
 
 
-bool init_decoder(ClientContext& ctx) {
-	Logger log("zcam_native.log");
+bool init_decoder(ClientContext& ctx)
+{
+	static Logger log("zcam_native.log");
 
-	std::string decoderName;
 	DecoderType decoderType = ctx.clientConfig.decoderType;
 	CodecType codecType = ctx.clientConfig.codecType;
 
-	decoderType = DecoderType::HW_CUDA;
-	codecType = CodecType::HEVC;
+	AVCodecID codec_id;
 
-	// Video
-	if (decoderType == DecoderType::HW_CUDA) {
-		if (codecType == CodecType::H264) {
-			decoderName = "h264_cuvid";
-		}
-		else if (codecType == CodecType::HEVC) {
-			decoderName = "hevc_cuvid";
-		}
-		else {
-			return false;
-		}
-		ctx.codec = avcodec_find_decoder_by_name(decoderName.c_str());  // or "h264_nvdec"
-		if (!ctx.codec) {
-			log.error("Client[{}] CUDA decoder not found", ctx.client_id);
-			return false;
-		}
+	if (codecType == CodecType::H264)
+		codec_id = AV_CODEC_ID_H264;
+	else if (codecType == CodecType::HEVC)
+		codec_id = AV_CODEC_ID_HEVC;
+	else
+		return false;
 
-		ctx.codec_ctx = avcodec_alloc_context3(ctx.codec);
-		if (!ctx.codec_ctx) return false;
+	ctx.codec = avcodec_find_decoder(codec_id);
+	ctx.wait_i_frame = true;
 
-		if (av_hwdevice_ctx_create(&ctx.hw_device_ctx, AV_HWDEVICE_TYPE_CUDA, nullptr, nullptr, 0) < 0) {
+	if (!ctx.codec)
+	{
+		log.error("Decoder not found for client {}", ctx.client_id);
+		return false;
+	}
+
+	ctx.codec_ctx = avcodec_alloc_context3(ctx.codec);
+
+	if (!ctx.codec_ctx)
+		return false;
+
+	// OBS-style settings for low latency
+	ctx.codec_ctx->thread_count = 0;
+	ctx.codec_ctx->delay = 0;
+
+	if (decoderType == DecoderType::HW_CUDA)
+	{
+		if (av_hwdevice_ctx_create(
+			&ctx.hw_device_ctx,
+			AV_HWDEVICE_TYPE_CUDA,
+			nullptr,
+			nullptr,
+			0) < 0)
+		{
 			log.error("Failed to create CUDA HW device for client {}", ctx.client_id);
 			return false;
 		}
+
 		ctx.codec_ctx->hw_device_ctx = av_buffer_ref(ctx.hw_device_ctx);
 
-		ctx.codec_ctx->get_format = [](AVCodecContext* ctx, const enum AVPixelFormat* pix_fmts) {
-			while (*pix_fmts != AV_PIX_FMT_NONE) {
-				if (*pix_fmts == AV_PIX_FMT_CUDA)
-					return *pix_fmts;
-				pix_fmts++;
-			}
-			return pix_fmts[0];
+		ctx.codec_ctx->get_format =
+			[](AVCodecContext* ctx, const enum AVPixelFormat* pix_fmts)
+			{
+				while (*pix_fmts != AV_PIX_FMT_NONE)
+				{
+					if (*pix_fmts == AV_PIX_FMT_CUDA)
+						return *pix_fmts;
+					pix_fmts++;
+				}
+				return pix_fmts[0];
 			};
 	}
-	else {  // SOFTWARE
-		if (codecType == CodecType::H264) {
-			ctx.codec = avcodec_find_decoder(AV_CODEC_ID_H264);
-		}
-		else if (codecType == CodecType::HEVC) {
-			ctx.codec = avcodec_find_decoder(AV_CODEC_ID_HEVC);
-		}
-		else {
-			return false;
-		}
 
-		if (!ctx.codec) {
-			log.error("Client[{}] software decoder not found", ctx.client_id);
-			return false;
-		}
-
-		ctx.codec_ctx = avcodec_alloc_context3(ctx.codec);
-		if (!ctx.codec_ctx) return false;
-	}
-
-	if (avcodec_open2(ctx.codec_ctx, ctx.codec, nullptr) < 0) {
+	if (avcodec_open2(ctx.codec_ctx, ctx.codec, nullptr) < 0)
+	{
 		log.error("Could not open codec for client {}", ctx.client_id);
 		return false;
 	}
 
-	log.info("Client {} Video decoder {} initialized ", ctx.client_id,
+	log.info("Client {} Video decoder initialized ({})",
+		ctx.client_id,
 		(decoderType == DecoderType::HW_CUDA ? "HW_CUDA" : "SOFTWARE"));
 
-	// Audio
+	// -------------------------
+	// AUDIO DECODER
+	// -------------------------
+
 	ctx.audio_codec = avcodec_find_decoder(AV_CODEC_ID_AAC);
-	ctx.audio_codec_ctx = avcodec_alloc_context3(ctx.audio_codec);
-	if (avcodec_open2(ctx.audio_codec_ctx, ctx.audio_codec, nullptr) < 0)
+
+	if (!ctx.audio_codec)
 	{
-		log.error("Failed to open audio decoder\n");
+		log.error("AAC decoder not found");
 		return false;
 	}
-	log.info("Client {} AudioDecoder Initialized", ctx.client_id);
+
+	ctx.audio_codec_ctx = avcodec_alloc_context3(ctx.audio_codec);
+
+	if (!ctx.audio_codec_ctx)
+		return false;
+
+	if (avcodec_open2(ctx.audio_codec_ctx, ctx.audio_codec, nullptr) < 0)
+	{
+		log.error("Failed to open audio decoder");
+		return false;
+	}
+
+	log.info("Client {} Audio decoder initialized", ctx.client_id);
 
 	return true;
 }
+
 
 // Don't forget to add a cleanup function for ClientContext to free CUDA resources
 void cleanup_client_context_cuda(ClientContext& ctx) {
@@ -487,13 +394,27 @@ void decode_video(ClientContext* ctx, VideoPacket* pkt)
 {
 	static Logger log("zcam_native.log");
 
-	if (!ctx || !pkt || !ctx->running)
-		return;
+
+	//-----------------------------------
+	// Build AVPacket (Annex-B format)
+	//-----------------------------------
 
 	AVPacket* avpkt = av_packet_alloc();
 
-	av_new_packet(avpkt, pkt->len);
-	memcpy(avpkt->data, pkt->data.get(), pkt->len);
+	int total = pkt->len + 4;
+
+	av_new_packet(avpkt, total);
+
+	avpkt->data[0] = 0;
+	avpkt->data[1] = 0;
+	avpkt->data[2] = 0;
+	avpkt->data[3] = 1;
+
+	memcpy(avpkt->data + 4, pkt->data.get(), pkt->len);
+
+	// Keyframe flag (important for decoder)
+	if (pkt->type == 5)
+		avpkt->flags |= AV_PKT_FLAG_KEY;
 
 	int ret = avcodec_send_packet(ctx->codec_ctx, avpkt);
 
@@ -502,20 +423,26 @@ void decode_video(ClientContext* ctx, VideoPacket* pkt)
 	if (ret < 0)
 		return;
 
+	//-----------------------------------
+	// Allocate decode frames
+	//-----------------------------------
+
 	if (!ctx->decode_frame)
 		ctx->decode_frame = av_frame_alloc();
 
 	if (ctx->clientConfig.decoderType == DecoderType::HW_CUDA &&
 		!ctx->hw_frame)
-	{
 		ctx->hw_frame = av_frame_alloc();
-	}
+
+	//-----------------------------------
+	// Receive decoded frames
+	//-----------------------------------
 
 	while (true)
 	{
-		av_frame_unref(ctx->decode_frame);
-
-		ret = avcodec_receive_frame(ctx->codec_ctx, ctx->decode_frame);
+		ret = avcodec_receive_frame(
+			ctx->codec_ctx,
+			ctx->decode_frame);
 
 		if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
 			break;
@@ -525,21 +452,29 @@ void decode_video(ClientContext* ctx, VideoPacket* pkt)
 
 		AVFrame* use_frame = ctx->decode_frame;
 
+		//-----------------------------------
+		// CUDA transfer
+		//-----------------------------------
+
 		if (ctx->clientConfig.decoderType == DecoderType::HW_CUDA)
 		{
-			//av_frame_unref(ctx->hw_frame);
+			av_frame_unref(ctx->hw_frame);
 
 			if (av_hwframe_transfer_data(
 				ctx->hw_frame,
 				ctx->decode_frame,
 				0) < 0)
 			{
-				log.error("Failed to transfer HW frame");
+				log.error("CUDA frame transfer failed");
 				break;
 			}
 
 			use_frame = ctx->hw_frame;
 		}
+
+		//-----------------------------------
+		// Allocate RGB frame if needed
+		//-----------------------------------
 
 		if (!ctx->rgb_frame ||
 			ctx->last_width != use_frame->width ||
@@ -552,6 +487,7 @@ void decode_video(ClientContext* ctx, VideoPacket* pkt)
 				sws_freeContext(ctx->sws_ctx);
 
 			ctx->rgb_frame = av_frame_alloc();
+
 			ctx->rgb_frame->format = AV_PIX_FMT_BGRA;
 			ctx->rgb_frame->width = use_frame->width;
 			ctx->rgb_frame->height = use_frame->height;
@@ -570,12 +506,13 @@ void decode_video(ClientContext* ctx, VideoPacket* pkt)
 				nullptr,
 				nullptr);
 
-			if (!ctx->sws_ctx)
-				return;
-
 			ctx->last_width = use_frame->width;
 			ctx->last_height = use_frame->height;
 		}
+
+		//-----------------------------------
+		// YUV → BGRA conversion
+		//-----------------------------------
 
 		sws_scale(
 			ctx->sws_ctx,
@@ -584,8 +521,11 @@ void decode_video(ClientContext* ctx, VideoPacket* pkt)
 			0,
 			use_frame->height,
 			ctx->rgb_frame->data,
-			ctx->rgb_frame->linesize
-		);
+			ctx->rgb_frame->linesize);
+
+		//-----------------------------------
+		// Push frame to NDI queue
+		//-----------------------------------
 
 		NDIFrame frame;
 
@@ -593,22 +533,26 @@ void decode_video(ClientContext* ctx, VideoPacket* pkt)
 		frame.height = ctx->rgb_frame->height;
 		frame.stride = ctx->rgb_frame->linesize[0];
 
-		size_t size = frame.stride * frame.height;
+		size_t frame_size = frame.stride * frame.height;
 
-		frame.data.resize(size);
+		frame.data.resize(frame_size);
 
-		memcpy(frame.data.data(), ctx->rgb_frame->data[0], size);
+		memcpy(frame.data.data(),
+			ctx->rgb_frame->data[0],
+			frame_size);
 
 		{
 			std::lock_guard<std::mutex> lock(ctx->ndi_mutex);
 
 			if (ctx->ndi_queue.size() > MAX_NDI_QUEUE_SIZE)
-				ctx->ndi_queue.pop();  // drop old frame
+				ctx->ndi_queue.pop();
 
 			ctx->ndi_queue.push(std::move(frame));
 		}
 
 		ctx->ndi_cv.notify_one();
+
+		av_frame_unref(ctx->decode_frame);
 	}
 }
 
@@ -697,7 +641,8 @@ static void setup(imf::Loop* loop)
 				VideoPacket pkt{
 					std::move(buffer),
 					h264->len,
-					h264->frm_no
+					h264->frm_no,
+					h264->type
 				};
 
 				ctx_ptr->videoQueue.enqueue(
@@ -805,7 +750,7 @@ int main(int argc, char** argv)
 	input.ip = ip;
 	input.ndi_name = ndi_name;
 	input.decoderType = DecoderType::HW_CUDA;
-	input.codecType = CodecType::HEVC;
+	input.codecType = CodecType::H264;
 
 	gClientInputs.push_back(input);
 

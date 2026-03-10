@@ -20,9 +20,9 @@ namespace com.khelai.ZCamStreamUI
         private bool _isLoadingSettings;
         private bool _isAsyncClosing = false;
 
-        private String? _zcamWorkerPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ZCamWorker.exe");
+        private String _zcamWorkerPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ZCamWorker.exe");
 
-        private ZCamNativeProcess? _zcamProcess = new ZCamNativeProcess(
+        private ZCamNativeProcess _zcamProcess = new ZCamNativeProcess(
             Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "ZCamNativeMain.exe"));
 
 
@@ -385,14 +385,25 @@ namespace com.khelai.ZCamStreamUI
                 return;
             }
 
+            if (!File.Exists(_zcamWorkerPath))
+            {
+                throw new FileNotFoundException("ZCamWorker.exe not found", _zcamWorkerPath);
+            }
+                     
+
             string jsonPath = WriteStreamsJson();
+
+            if (!File.Exists(jsonPath))
+            {
+                throw new FileNotFoundException("jsonPath not found", jsonPath);
+            }
 
             if (!File.Exists(jsonPath))
                 return;
 
             try
             {
-                await _zcamProcess.RunAsync(_zcamWorkerPath, $"\"{jsonPath}\"", CancellationToken.None);
+                await _zcamProcess.RunAsync(_zcamWorkerPath, jsonPath, CancellationToken.None);
             }
             catch (OperationCanceledException)
             {
