@@ -29,7 +29,6 @@
     <ClInclude Include="ClientProcessor.h" />
     <ClInclude Include="Logger.h" />
     <ClInclude Include="VFrameQueue.h" />
-    <ClInclude Include="ZCamWorker\StreamParser.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>

@@ -193,6 +193,8 @@ namespace com.khelai.ZCamStreamUI
             Logger.Info("Stopping ZCamNative...");
             if (_runningProcess != null && !_runningProcess.HasExited)
             {
+                _runningProcess.StandardInput.Close(); // Signal the process to exit gracefully
+
                 // 1. Try to close gracefully
                 _runningProcess.CloseMainWindow();
 

@@ -4,12 +4,15 @@
 #include <spdlog/spdlog.h>
 #include <string>
 
+
+
 namespace com_khelai_zcamnative
 {
     class Logger
     {
     public:
-        explicit Logger(const std::string& logFilePath);
+        static std::shared_ptr<spdlog::logger> Get();
+        static void Init(const std::string& logFilePath);
 
         void info(const std::string& msg);
         void warn(const std::string& msg);
@@ -17,33 +20,31 @@ namespace com_khelai_zcamnative
         void debug(const std::string& msg);
 
         template<typename... Args>
-        void info(const char* fmt, Args&&... args)
+        static void info(const char* fmt, Args&&... args)
         {
-            _logger->info(fmt, std::forward<Args>(args)...);
+            Get()->info(fmt, std::forward<Args>(args)...);
         }
 
         template<typename... Args>
-        void warn(const char* fmt, Args&&... args)
+        static void warn(const char* fmt, Args&&... args)
         {
-            _logger->warn(fmt, std::forward<Args>(args)...);
+            Get()->warn(fmt, std::forward<Args>(args)...);
         }
 
         template<typename... Args>
-        void error(const char* fmt, Args&&... args)
+        static void error(const char* fmt, Args&&... args)
         {
-            _logger->error(fmt, std::forward<Args>(args)...);
+            Get()->error(fmt, std::forward<Args>(args)...);
         }
 
         template<typename... Args>
-        void debug(const char* fmt, Args&&... args)
+        static void debug(const char* fmt, Args&&... args)
         {
-            _logger->debug(fmt, std::forward<Args>(args)...);
+            Get()->debug(fmt, std::forward<Args>(args)...);
         }
 
     private:
-        static std::shared_ptr<class spdlog::logger> s_sharedLogger;
-        std::shared_ptr<class spdlog::logger> _logger;
-
-        static void InitSharedLogger(const std::string& logFilePath);
+        static std::shared_ptr<spdlog::logger> s_logger;
+        static std::mutex s_mutex;
     };
 }

@@ -35,8 +35,5 @@
     <ClInclude Include="ClientProcessor.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="ZCamWorker\StreamParser.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
   </ItemGroup>
 </Project>

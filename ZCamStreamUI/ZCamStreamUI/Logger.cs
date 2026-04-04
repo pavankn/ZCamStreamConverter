@@ -13,8 +13,6 @@ namespace com.khelai.ZCamStreamUI
     {
         private static readonly object _lock = new object();
 
-        //private static readonly string LogDirectory =
-        //    Path.Combine(AppContext.BaseDirectory, "Logs", "Fastboot");
         private static string appDataLocal = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
 
         private static readonly string LogDirectory = Path.Combine(appDataLocal, "KhelAI", "Logs");
@@ -36,7 +34,7 @@ namespace com.khelai.ZCamStreamUI
 
                 // Daily log file (most common & convenient pattern)
                 string dateStamp = DateTime.Now.ToString("yyyy-MM-dd");
-                _logFilePath = Path.Combine(LogDirectory, $"fastboot_{dateStamp}.log");
+                _logFilePath = Path.Combine(LogDirectory, $"ZCamStreamUI_{dateStamp}.log");
 
                 if (_logFilePath != null)
                 {
@@ -149,7 +147,7 @@ namespace com.khelai.ZCamStreamUI
         public static void RotateLog()
         {
             string dateStamp = DateTime.Now.ToString("yyyy-MM-dd");
-            _logFilePath = Path.Combine(LogDirectory, $"fastboot_{dateStamp}.log");
+            _logFilePath = Path.Combine(LogDirectory, $"ZCamStreamUI_{dateStamp}.log");
             Info("Log file rotated to new day");
         }
     }
